@@ -108,16 +108,20 @@ local function find_aura(name, unit, auratype, myCast)
 		found, foundstacks, foundsid, foundrem, foundtex = 1, stacks, sid, rem, tex
 		local _, unitGUID = UnitExists(unit)
 		if unitGUID then unitGUID = gsub(unitGUID, "^0x", "") end
-		if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][sid] and sA.auraTimers[unitGUID][sid].castby and sA.auraTimers[unitGUID][sid].castby == sA.playerGUID
-		or (unit == "Player") then
+		
+		-- If myCast is enabled (1), only show player's own casts
+		if myCast == 1 then
+			if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][sid] and sA.auraTimers[unitGUID][sid].castby and sA.auraTimers[unitGUID][sid].castby == sA.playerGUID
+			or (unit == "Player") then
+				return true, stacks, sid, rem, tex
+			end
+		else
+			-- myCast disabled (0), show any caster
 			return true, stacks, sid, rem, tex
 		end
       end
       i = i + 1
     end
-	if found == 1 and myCast == 0 then
-		return true, foundstacks, foundsid, foundrem, foundtex
-	end
     return false
   end
 
@@ -231,6 +235,10 @@ local function CreateAuraFrame(id)
   f.stackstext:SetFont(FONT, 10, "OUTLINE")
   f.stackstext:SetPoint("TOPLEFT", f.durationtext, "CENTER", 1, -6)
 
+  -- Cache for smart rendering (avoid updating text every frame)
+  f.lastDisplayedTime = nil
+  f.lastDisplayedStacks = nil
+
   return f
 end
 
@@ -295,7 +303,164 @@ local function CreateDualFrame(id)
 end
 
 -------------------------------------------------
--- Update aura display
+-- Initialize aura cache on addon load
+-------------------------------------------------
+function sA:InitializeAuraCache()
+  if not simpleAuras or not simpleAuras.auras then return end
+  
+  -- Pre-populate cache for all configured auras
+  for id, aura in ipairs(simpleAuras.auras) do
+    if aura and aura.name and aura.name ~= "" then
+      sA.activeAuras[id] = {
+        active = false,
+        expiry = nil,
+        stacks = 0,
+        icon = nil,
+        spellID = nil,
+        lastUpdate = 0,
+        lastScan = 0  -- Track when we last scanned (for periodic refresh)
+      }
+    end
+  end
+  
+  -- Do initial data fetch for all units
+  self:UpdateAuraDataForUnit("Player")
+  self:UpdateAuraDataForUnit("Target")
+  self:UpdateCooldownData()
+end
+
+-------------------------------------------------
+-- Update cached aura data for specific unit (event-driven + periodic fallback)
+-- This function FETCHES data from WoW API and STORES it in cache
+-- Called by: 
+--   - UNIT_AURA events (immediate)
+--   - PLAYER_TARGET_CHANGED (immediate)
+--   - Periodic scan at simpleAuras.refresh rate (default: 5/sec)
+-------------------------------------------------
+function sA:UpdateAuraDataForUnit(unitFilter)
+  if not simpleAuras or not simpleAuras.auras then return end
+  
+  local currentTime = GetTime()
+  
+  for id, aura in ipairs(simpleAuras.auras) do
+    -- Only process auras for this unit
+    if aura and aura.name and aura.name ~= "" and aura.unit == unitFilter and aura.type ~= "Cooldown" then
+      
+      -- Initialize cache entry
+      sA.activeAuras[id] = sA.activeAuras[id] or {
+        active = false,
+        expiry = nil,
+        stacks = 0,
+        icon = nil,
+        spellID = nil,
+        lastUpdate = 0,
+        lastScan = 0
+      }
+      
+      local spellID, icon, duration, stacks
+      
+      if sA.SuperWoW then
+        spellID, icon, duration, stacks = self:GetSuperAuraInfos(aura.name, aura.unit, aura.type, aura.myCast)
+      else
+        icon, duration, stacks = self:GetAuraInfos(aura.name, aura.unit, aura.type)
+      end
+      
+      if icon then
+        -- Aura found - calculate expiry time
+        local expiry = nil
+        
+        if duration and duration > 0 then
+          expiry = currentTime + duration
+        else
+          -- Try to get from auraTimers fallback
+          local _, unitGUID = UnitExists(aura.unit == "Player" and "player" or "target")
+          if unitGUID and spellID then
+            unitGUID = gsub(unitGUID, "^0x", "")
+            if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][spellID] then
+              expiry = sA.auraTimers[unitGUID][spellID].duration
+            end
+          end
+        end
+        
+        sA.activeAuras[id].active = true
+        sA.activeAuras[id].expiry = expiry
+        sA.activeAuras[id].stacks = stacks or 0
+        sA.activeAuras[id].icon = icon
+        sA.activeAuras[id].spellID = spellID
+        sA.activeAuras[id].lastUpdate = currentTime
+        sA.activeAuras[id].lastScan = currentTime
+        
+        -- Auto-detect texture
+        if aura.autodetect == 1 and aura.texture ~= icon then
+          aura.texture = icon
+          simpleAuras.auras[id].texture = icon
+        end
+      else
+        -- Aura not found
+        sA.activeAuras[id].active = false
+        sA.activeAuras[id].expiry = nil
+        sA.activeAuras[id].lastUpdate = currentTime
+        sA.activeAuras[id].lastScan = currentTime
+      end
+    end
+  end
+end
+
+-------------------------------------------------
+-- Update cooldown data (event-driven + periodic fallback)
+-- This function FETCHES cooldown info from WoW API and STORES it in cache
+-- Called by:
+--   - SPELL_UPDATE_COOLDOWN events (immediate)
+--   - Periodic scan at simpleAuras.refresh rate (default: 5/sec)
+-------------------------------------------------
+function sA:UpdateCooldownData()
+  if not simpleAuras or not simpleAuras.auras then return end
+  
+  local currentTime = GetTime()
+  
+  for id, aura in ipairs(simpleAuras.auras) do
+    if aura and aura.name and aura.name ~= "" and aura.type == "Cooldown" then
+      
+      sA.activeAuras[id] = sA.activeAuras[id] or {
+        active = false,
+        expiry = nil,
+        stacks = 0,
+        icon = nil,
+        spellID = nil,
+        lastUpdate = 0,
+        lastScan = 0
+      }
+      
+      local texture, remaining_time = self:GetCooldownInfo(aura.name)
+      
+      if texture then
+        local expiry = nil
+        if remaining_time and remaining_time > 0 then
+          expiry = currentTime + remaining_time
+        end
+        
+        sA.activeAuras[id].active = true
+        sA.activeAuras[id].expiry = expiry
+        sA.activeAuras[id].icon = texture
+        sA.activeAuras[id].stacks = 0
+        sA.activeAuras[id].lastUpdate = currentTime
+        sA.activeAuras[id].lastScan = currentTime
+      else
+        sA.activeAuras[id].active = false
+        sA.activeAuras[id].expiry = nil
+        sA.activeAuras[id].lastUpdate = currentTime
+        sA.activeAuras[id].lastScan = currentTime
+      end
+    end
+  end
+end
+
+-------------------------------------------------
+-- Update aura display (RENDERING ONLY - uses cached data)
+-- This function does NOT fetch data from API, only renders GUI
+-- Called by: OnUpdate at FIXED 20 FPS (0.05 sec intervals)
+-- Data source: sA.activeAuras cache (populated by UpdateAuraDataForUnit/UpdateCooldownData)
+-- Only calculates: remaining = expiry - GetTime() (simple math!)
 -------------------------------------------------
 function sA:UpdateAuras()
 
@@ -309,6 +474,9 @@ function sA:UpdateAuras()
   end
 
   -- Get the current player status once per cycle
+  -- Data updates happen separately via events + periodic scan in init.lua
+  -- This function only renders the GUI using cached data
+  local currentTime = GetTime()
   local hasTarget = UnitExists("target")
   local inCombat = UnitAffectingCombat("player")
   local inRaid = UnitInRaid("player")
@@ -347,23 +515,40 @@ function sA:UpdateAuras()
           local targetCheckPassed = (aura.unit ~= "Target" or hasTarget)
           
           if targetCheckPassed then
-            -- Get aura data (icon indicates presence)
-            if sA.SuperWoW then
-                spellID, icon, duration, stacks = self:GetSuperAuraInfos(aura.name, aura.unit, aura.type, aura.myCast)
-            else
-                icon, duration, stacks = self:GetAuraInfos(aura.name, aura.unit, aura.type)
-            end
+            -- Get cached aura data (updated by events + periodic scan)
+            local auraData = sA.activeAuras[id]
             
-            local auraIsPresent = icon and 1 or 0
-            
-            -- Apply inversion logic
-            if aura.type == "Cooldown" then
-              local onCooldown = duration and duration > 0
-              show = (((aura.showCD == "No CD" or aura.showCD == "Always") and not onCooldown) or ((aura.showCD == "CD" or aura.showCD == "Always") and onCooldown)) and 1 or 0
-            elseif aura.invert == 1 then
-              show = 1 - auraIsPresent
-            else
-              show = auraIsPresent
+            if auraData then
+              -- Safety: if expiry passed and last scan was >1 sec ago, mark as inactive
+              if auraData.active and auraData.expiry and auraData.expiry < currentTime then
+                if (currentTime - auraData.lastScan) > 1.0 then
+                  auraData.active = false
+                  auraData.expiry = nil
+                end
+              end
+              
+              local auraIsPresent = auraData.active and 1 or 0
+              
+              -- Calculate remaining time from cached expiry
+              if auraData.expiry and auraData.expiry > currentTime then
+                duration = auraData.expiry - currentTime
+              else
+                duration = nil
+              end
+              
+              icon = auraData.icon
+              stacks = auraData.stacks
+              spellID = auraData.spellID
+              
+              -- Apply inversion logic
+              if aura.type == "Cooldown" then
+                local onCooldown = duration and duration > 0
+                show = (((aura.showCD == "No CD" or aura.showCD == "Always") and not onCooldown) or ((aura.showCD == "CD" or aura.showCD == "Always") and onCooldown)) and 1 or 0
+              elseif aura.invert == 1 then
+                show = 1 - auraIsPresent
+              else
+                show = auraIsPresent
+              end
             end
           end
         end
@@ -378,41 +563,48 @@ function sA:UpdateAuras()
       end
 
       if shouldShow then
-        -- Get fresh aura data only if we are going to show it
-        if not (icon or aura.name) then -- Data might not have been fetched in /sa mode
-		  spellID = nil
-          if sA.SuperWoW then
-            spellID, icon, duration, stacks = self:GetSuperAuraInfos(aura.name, aura.unit, aura.type)
-          else
-            icon, duration, stacks = self:GetAuraInfos(aura.name, aura.unit, aura.type)
-          end
-        end
-
+        -- Use cached data (already fetched above or from events)
         if icon then
           currentDuration = duration
           currentStacks = stacks
-          if aura.autodetect == 1 and aura.texture ~= icon then
-              aura.texture, simpleAuras.auras[id].texture = icon, icon
-          end
         end
         
         -------------------------------------------------
-        -- Duration text
+        -- Duration text (smart update - skip if change < 0.1s)
         -------------------------------------------------
         if aura.duration == 1 and currentDuration then
-          if sA.SuperWoW and sA.learnNew[spellID] and sA.learnNew[spellID] == 1 then
-			currentDurationtext = "learning"
-          elseif currentDuration > 100 then
-            currentDurationtext = floor(currentDuration / 60 + 0.5) .. "m"
-		  elseif currentDuration <= (aura.lowdurationvalue or 5) then
-            currentDurationtext = format("%.1f", floor(currentDuration * 10 + 0.5) / 10)
-          else
-            currentDurationtext = floor(currentDuration + 0.5)
+          -- Check if we need to update (skip unnecessary string operations)
+          local shouldUpdateText = true
+          if frame.lastDisplayedTime then
+            local timeDiff = math.abs(currentDuration - frame.lastDisplayedTime)
+            -- For low duration with decimals, update more frequently
+            if currentDuration <= (aura.lowdurationvalue or 5) then
+              shouldUpdateText = timeDiff >= 0.1
+            else
+              shouldUpdateText = timeDiff >= 0.5
+            end
           end
-        end
-
-        if currentDurationtext == "0.0" then
-          currentDurationtext = 0
+          
+          if shouldUpdateText then
+            if sA.SuperWoW and sA.learnNew[spellID] and sA.learnNew[spellID] == 1 then
+              currentDurationtext = "learning"
+            elseif currentDuration > 100 then
+              currentDurationtext = floor(currentDuration / 60 + 0.5) .. "m"
+            elseif currentDuration <= (aura.lowdurationvalue or 5) then
+              currentDurationtext = format("%.1f", floor(currentDuration * 10 + 0.5) / 10)
+            else
+              currentDurationtext = floor(currentDuration + 0.5)
+            end
+            
+            if currentDurationtext == "0.0" then
+              currentDurationtext = 0
+            end
+            
+            frame.lastDisplayedTime = currentDuration
+          else
+            -- Use cached text (don't update)
+            currentDurationtext = frame.durationtext:GetText() or ""
+          end
         end
 
         -------------------------------------------------
@@ -429,8 +621,24 @@ function sA:UpdateAuras()
         frame:SetWidth(48 * scale)
   	    frame:SetHeight(48 * scale)
         frame.texture:SetTexture(aura.texture)
-        frame.durationtext:SetText((aura.duration == 1 and (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown")) and currentDurationtext or "")
-        frame.stackstext:SetText((aura.stacks == 1) and currentStacks or "")
+        
+        -- Smart text updates (only if changed)
+        if aura.duration == 1 and (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown") then
+          if frame.durationtext:GetText() ~= currentDurationtext then
+            frame.durationtext:SetText(currentDurationtext)
+          end
+        else
+          frame.durationtext:SetText("")
+        end
+        
+        if aura.stacks == 1 then
+          if frame.lastDisplayedStacks ~= currentStacks then
+            frame.stackstext:SetText(currentStacks)
+            frame.lastDisplayedStacks = currentStacks
+          end
+        else
+          frame.stackstext:SetText("")
+        end
         if aura.duration == 1 then frame.durationtext:SetFont(FONT, 20 * textscale, "OUTLINE") end
         if aura.stacks   == 1 then frame.stackstext:SetFont(FONT, 14 * scale, "OUTLINE") end
 

@@ -19,6 +19,9 @@ f:SetScript("OnEvent", function()
 		
 		sA.SettingsLoaded = 1
 		
+		-- Initialize aura cache on load
+		sA:InitializeAuraCache()
+		
 		sA:CreateTestAuras()
 
 		table.insert(UISpecialFrames, "sATest")
@@ -27,7 +30,11 @@ f:SetScript("OnEvent", function()
 end)
 
 -- runtime only
-sA = sA or { auraTimers = {}, learnCastTimers = {}, learnNew = {}, frames = {}, dualframes = {}, draggers = {} }
+sA = sA or { auraTimers = {}, learnCastTimers = {}, learnNew = {}, frames = {}, dualframes = {}, draggers = {}, activeAuras = {} }
+
+-- Get version from .toc file using WoW API
+sA.VERSION = GetAddOnMetadata("simpleAuras", "Version") or "1.0"
+
 sA.SuperWoW = SetAutoloot and true or false
 local _, playerGUID = UnitExists("player")
 sA.playerGUID = playerGUID
@@ -43,7 +50,7 @@ local getn   = table.getn
 local GetTime = GetTime
 
 -- message helper
-sA.PREFIX = "|c194b7dccsimple|cffffffffAuras: "
+sA.PREFIX = "|c194b7dccsimple|cffffffffAuras v" .. (sA.VERSION or "1.0") .. ": "
 function sA:Msg(msg)
   DEFAULT_CHAT_FRAME:AddMessage(self.PREFIX .. msg)
 end
@@ -200,13 +207,43 @@ if sA.SuperWoW then
   end)
 end
 
--- Timed updates
+-- Periodic data updates (controlled by /sa refresh setting)
+-- This is the HEAVY operation: scans UnitBuff, UnitDebuff, GetSpellCooldown
+local sADataUpdate = CreateFrame("Frame", "sADataUpdate", UIParent)
+sADataUpdate:SetScript("OnUpdate", function()
+	if not sA.SettingsLoaded then return end
+	
+	local time = GetTime()
+	-- Frequency controlled by simpleAuras.refresh (1-10 per second)
+	local dataRefreshRate = 1 / (simpleAuras.refresh or 5)
+	if (time - (sADataUpdate.lastUpdate or 0)) < dataRefreshRate then return end
+	
+	sADataUpdate.lastUpdate = time
+	
+	-- Rescan auras (catches missed events + provides periodic fallback)
+	sA:UpdateAuraDataForUnit("Player")
+	if UnitExists("target") then
+		sA:UpdateAuraDataForUnit("Target")
+	else
+		-- Clear target auras if no target exists
+		for id, aura in ipairs(simpleAuras.auras or {}) do
+			if aura and aura.unit == "Target" and sA.activeAuras[id] then
+				sA.activeAuras[id].active = false
+				sA.activeAuras[id].expiry = nil
+			end
+		end
+	end
+	sA:UpdateCooldownData()
+end)
+
+-- GUI rendering updates (fixed at 20 FPS for smooth animations)
+-- This is LIGHT operation: only math (expiry - GetTime) and text updates
 local sAEvent = CreateFrame("Frame", "sAEvent", UIParent)
 sAEvent:SetScript("OnUpdate", function()
 
 	local time = GetTime()
-	local refreshRate = 1 / (simpleAuras.refresh or 5)
-	if (time - (sAEvent.lastUpdate or 0)) < refreshRate then return end
+	local guiRefreshRate = 1 / 20  -- Fixed 20 FPS (0.05 seconds)
+	if (time - (sAEvent.lastUpdate or 0)) < guiRefreshRate then return end
 		
   -- Cache the UI scale in a safe context
   sA.uiScale = UIParent:GetEffectiveScale()
@@ -272,6 +309,7 @@ sAEvent:SetScript("OnUpdate", function()
   end
 		
   sAEvent.lastUpdate = time
+  -- Only render GUI, don't fetch data here
   sA:UpdateAuras()
 		
 end)
@@ -285,6 +323,47 @@ sACombat:SetScript("OnEvent", function()
     sAinCombat = true
   elseif event == "PLAYER_REGEN_ENABLED" then
     sAinCombat = nil
+  end
+end)
+
+-- Aura tracking events (event-driven updates)
+local sAAuraTracker = CreateFrame("Frame")
+sAAuraTracker:RegisterEvent("UNIT_AURA")
+sAAuraTracker:RegisterEvent("PLAYER_AURAS_CHANGED")
+sAAuraTracker:RegisterEvent("PLAYER_TARGET_CHANGED")
+sAAuraTracker:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+sAAuraTracker:SetScript("OnEvent", function()
+  if not sA.SettingsLoaded then return end
+  
+  if event == "UNIT_AURA" then
+    local unit = arg1
+    -- Update data for auras tracking this unit
+    if unit == "player" then
+      sA:UpdateAuraDataForUnit("Player")
+    elseif unit == "target" then
+      sA:UpdateAuraDataForUnit("Target")
+    end
+    
+  elseif event == "PLAYER_AURAS_CHANGED" then
+    -- Fallback event for player auras
+    sA:UpdateAuraDataForUnit("Player")
+    
+  elseif event == "PLAYER_TARGET_CHANGED" then
+    -- Target changed, clear old target auras first, then scan new target
+    for id, aura in ipairs(simpleAuras.auras or {}) do
+      if aura and aura.unit == "Target" and sA.activeAuras[id] then
+        sA.activeAuras[id].active = false
+        sA.activeAuras[id].expiry = nil
+      end
+    end
+    -- Now scan new target
+    if UnitExists("target") then
+      sA:UpdateAuraDataForUnit("Target")
+    end
+    
+  elseif event == "SPELL_UPDATE_COOLDOWN" then
+    -- Update all cooldown-type auras
+    sA:UpdateCooldownData()
   end
 end)
 
@@ -326,10 +405,11 @@ SlashCmdList["sA"] = function(msg)
 		local num = tonumber(val)
 		if num and num >= 1 and num <= 10 then
 			simpleAuras.refresh = num
-			sA:Msg("Refresh set to " .. num .. " times per second")
+			sA:Msg("Data scan rate set to " .. num .. " times per second")
 		else
-			sA:Msg("Usage: /sa refresh X - set refresh rate. (1 to 10 updates per second. Default: 5).")
-			sA:Msg("Current refresh = " .. simpleAuras.refresh .. " times per second.")
+			sA:Msg("Usage: /sa refresh X - set aura data scan rate. (1 to 10 scans per second. Default: 5).")
+			sA:Msg("Note: GUI always renders at 20 FPS. This controls how often aura data is fetched.")
+			sA:Msg("Current scan rate = " .. simpleAuras.refresh .. " times per second.")
 		end
 		return
 	end
@@ -444,7 +524,7 @@ SlashCmdList["sA"] = function(msg)
 	-- help or unknown command fallback
 	sA:Msg("Usage:")
 	sA:Msg("/sa or /sa show or /sa hide - show/hide simpleAuras Settings.")
-	sA:Msg("/sa refresh X - set refresh rate. (1 to 10 updates per second. Default: 5).")
+	sA:Msg("/sa refresh X - set aura data scan rate. (1 to 10 scans per second. Default: 5). GUI renders at fixed 20 FPS.")
 	if sA.SuperWoW then
 		sA:Msg("/sa learn X Y - manually set duration Y of spellID X.")
 		sA:Msg("/sa forget X - forget AuraDuration of SpellID X (or use 'all' instead to delete all durations).")

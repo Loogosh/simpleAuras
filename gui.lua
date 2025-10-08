@@ -114,7 +114,7 @@ if not gui then
 
   local title = gui:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("TOP", 0, -5)
-  title:SetText("simpleAuras")
+  title:SetText("simpleAuras v" .. (sA.VERSION or "1.0"))
 
   gui:Hide()
   table.insert(UISpecialFrames, "sAGUI")
@@ -396,6 +396,13 @@ function sA:SaveAura(id)
   ed.y:ClearFocus()
   ed.lowdurationvalue:ClearFocus()
 
+  -- Update cache for this aura after saving changes
+  if data.type == "Cooldown" then
+    sA:UpdateCooldownData()
+  else
+    sA:UpdateAuraDataForUnit(data.unit)
+  end
+
   if sA.TestAura then sA.TestAura:Hide() end
   if sA.TestAuraDual then sA.TestAuraDual:Hide() end
   ed:Hide()
@@ -414,6 +421,18 @@ function sA:AddAura(copyId)
   else
     simpleAuras.auras[newId] = {["enabled"]=1,["myCast"]=1,["name"]="",["auracolor"]={[1]=1,[2]=1,[3]=1,[4]=1},["autodetect"]=0,["texture"]="Interface\\Icons\\INV_Misc_QuestionMark",["scale"]=1,["xpos"]=0,["ypos"]=0,["duration"]=0,["stacks"]=0,["type"]="Buff",["unit"]="Player",["showCD"]="Always",["lowduration"]=0,["lowdurationcolor"]={[1]=1,[2]=0,[3]=0,[4]=1},["lowdurationvalue"]=5,["inCombat"]=1,["outCombat"]=1,["inParty"]=0,["inRaid"]=0,["invert"]=0,["dual"]=0}
   end
+  
+  -- Initialize cache entry for new aura
+  sA.activeAuras[newId] = {
+    active = false,
+    expiry = nil,
+    stacks = 0,
+    icon = nil,
+    spellID = nil,
+    lastUpdate = 0,
+    lastScan = 0
+  }
+  
   if gui.editor and gui.editor:IsShown() then
     gui.editor:Hide()
     gui.editor = nil
@@ -1232,6 +1251,11 @@ function sA:EditAura(id)
       sA.frames = {}
       sA.dualframes = {}
       sA.draggers = {}
+      
+      -- Rebuild cache after deletion (indices changed)
+      sA.activeAuras = {}
+      sA:InitializeAuraCache()
+      
       ed.confirm:Hide()
       ed:Hide()
       gui.editor = nil
@@ -1730,6 +1754,10 @@ function sA:ImportAuras(importString)
 
     if importedCount > 0 then
         sA:Msg(importedCount .. " aura(s) imported successfully.")
+        
+        -- Reinitialize cache for all auras after import
+        sA:InitializeAuraCache()
+        
 		if importedCount == 1 then
 			local newId = table.getn(simpleAuras.auras)
 			sA:EditAura(newId)

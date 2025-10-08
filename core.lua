@@ -108,16 +108,20 @@ local function find_aura(name, unit, auratype, myCast)
 		found, foundstacks, foundsid, foundrem, foundtex = 1, stacks, sid, rem, tex
 		local _, unitGUID = UnitExists(unit)
 		if unitGUID then unitGUID = gsub(unitGUID, "^0x", "") end
-		if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][sid] and sA.auraTimers[unitGUID][sid].castby and sA.auraTimers[unitGUID][sid].castby == sA.playerGUID
-		or (unit == "Player") then
+		
+		-- If myCast is enabled (1), only show player's own casts
+		if myCast == 1 then
+			if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][sid] and sA.auraTimers[unitGUID][sid].castby and sA.auraTimers[unitGUID][sid].castby == sA.playerGUID
+			or (unit == "Player") then
+				return true, stacks, sid, rem, tex
+			end
+		else
+			-- myCast disabled (0), show any caster
 			return true, stacks, sid, rem, tex
 		end
       end
       i = i + 1
     end
-	if found == 1 and myCast == 0 then
-		return true, foundstacks, foundsid, foundrem, foundtex
-	end
     return false
   end
 

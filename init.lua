@@ -117,9 +117,11 @@ if sA.SuperWoW then
               simpleAuras.auradurations[spellID][casterGUID] = floor(actual + 0.5)
 			  sA.learnNew[spellID] = nil
               if simpleAuras.updating == 1 then
-                sA:Msg("Updated " .. spellName .. " (ID:"..spellID..") to: " .. floor(actual + 0.5) .. "s")
+                local casterType = (casterGUID == sA.playerGUID) and "your" or "ally's"
+                sA:Msg("Updated " .. casterType .. " " .. spellName .. " (ID:"..spellID..") to: " .. floor(actual + 0.5) .. "s")
               elseif simpleAuras.showlearning == 1 then
-				sA:Msg("Learned " .. spellName .. " (ID:"..spellID..") duration: " .. floor(actual + 0.5) .. "s")
+                local casterType = (casterGUID == sA.playerGUID) and "your" or "ally's"
+				sA:Msg("Learned " .. casterType .. " " .. spellName .. " (ID:"..spellID..") duration: " .. floor(actual + 0.5) .. "s")
 			  end
               sA.learnCastTimers[targetGUID][spellID].duration = nil
               sA.learnCastTimers[targetGUID][spellID].castby = nil
@@ -158,7 +160,8 @@ if sA.SuperWoW then
 
 		  local dur = GetAuraDurationBySpellID(spellID,casterGUID)
 	  
-		  if dur and dur > 0 and simpleAuras.updating == 0 and casterGUID == sA.playerGUID then
+		  if dur and dur > 0 and simpleAuras.updating == 0 then
+			-- Use known duration from any caster (not just player)
 			sA.auraTimers[targetGUID] = sA.auraTimers[targetGUID] or {}
 			sA.auraTimers[targetGUID][spellID] = sA.auraTimers[targetGUID][spellID] or {}
 			if not sA.auraTimers[targetGUID][spellID].duration or (dur + timestamp) > sA.auraTimers[targetGUID][spellID].duration then
@@ -166,7 +169,8 @@ if sA.SuperWoW then
 				sA.auraTimers[targetGUID][spellID].castby = casterGUID
 			end
 			sA.learnNew[spellID] = nil
-		  elseif casterGUID == sA.playerGUID then
+		  else
+			-- Learn duration from any caster (not just player)
 
 			local showLearn = nil
 						
@@ -189,14 +193,18 @@ if sA.SuperWoW then
 				end
 			end
 						
-			if showLearn and casterGUID == sA.playerGUID and targetGUID ~= sA.playerGUID then
+			-- Show learning notification for any caster if aura is tracked
+			if showLearn and targetGUID ~= sA.playerGUID then
 				sA.learnNew[spellID] = 1
 			end
 			
+			-- Display learning message for any caster
 			if simpleAuras.updating == 1 then
-			  sA:Msg("Updating " .. (spellName or spellID) .. " (ID:"..spellID..")...")
+			  local casterName = (casterGUID == sA.playerGUID) and "your" or "ally's"
+			  sA:Msg("Updating " .. casterName .. " " .. (spellName or spellID) .. " (ID:"..spellID..")...")
 			elseif simpleAuras.showlearning == 1 then
-			  sA:Msg("Learning " .. (spellName or spellID) .. " (ID:"..spellID..")...")
+			  local casterName = (casterGUID == sA.playerGUID) and "your" or "ally's"
+			  sA:Msg("Learning " .. casterName .. " " .. (spellName or spellID) .. " (ID:"..spellID..")...")
 			end
 			
 		  end

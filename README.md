@@ -22,6 +22,7 @@
 /sa or /sa show or /sa hide - Show/hide simpleAuras Settings.
 
 /sa refresh X - Set refresh rate. (1 to 10 updates per second. Default: 5).
+It only affects the data update time, the GUI is always drawn at 20
 
 ### SuperWoW commands:
 /sa learn X Y - manually set duration Y of spellID X.

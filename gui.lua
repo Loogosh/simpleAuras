@@ -380,7 +380,14 @@ function sA:SaveAura(id)
   data.lowdurationvalue= tonumber(ed.lowdurationvalue:GetText())
   data.lowdurationcolor= ed.lowdurationcolor
   data.type            = ed.typeButton.text:GetText()
-  data.unit            = ed.unitButton.text:GetText()
+  
+  -- Reactive spells are always Player spells
+  if data.type == "Reactive" then
+    data.unit = "Player"
+  else
+    data.unit = ed.unitButton.text:GetText()
+  end
+  
   data.showCD          = ed.showCD.text:GetText()
   data.inCombat        = ed.inCombat.value
   data.outCombat       = ed.outCombat.value
@@ -399,6 +406,8 @@ function sA:SaveAura(id)
   -- Update cache for this aura after saving changes
   if data.type == "Cooldown" then
     sA:UpdateCooldownData()
+  elseif data.type == "Reactive" then
+    sA:UpdateReactiveData()
   else
     sA:UpdateAuraDataForUnit(data.unit)
   end
@@ -521,6 +530,12 @@ function sA:EditAura(id)
     ed.nameLabel = ed:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     ed.nameLabel:SetPoint("TOPLEFT", ed.enabled, "BOTTOMLEFT", 0, -15)
     ed.nameLabel:SetText("Aura Name:")
+    
+    ed.nameHint = ed:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ed.nameHint:SetPoint("TOPLEFT", ed.nameLabel, "BOTTOMLEFT", 0, -2)
+    ed.nameHint:SetTextColor(0.7, 0.7, 0.7)
+    ed.nameHint:SetText("")
+    
     ed.name = CreateFrame("EditBox", nil, ed)
     ed.name:SetPoint("LEFT", ed.nameLabel, "RIGHT", 5, 0)
     ed.name:SetWidth(198)
@@ -741,7 +756,7 @@ function sA:EditAura(id)
         menu:SetFrameStrata("DIALOG")
         menu:SetFrameLevel(10)
         menu:SetWidth(80)
-        menu:SetHeight(40)
+        menu:SetHeight(80)
         sA:SkinFrame(menu, {0.15,0.15,0.15,1})
         menu:Hide()
         ed.typeButton.menu = menu
@@ -766,6 +781,7 @@ function sA:EditAura(id)
         makeChoice("Buff", 1)
         makeChoice("Debuff", 2)
         makeChoice("Cooldown", 3)
+        makeChoice("Reactive", 4)
       end
       local menu = ed.typeButton.menu
       if menu:IsVisible() then menu:Hide() else menu:Show() end
@@ -1075,6 +1091,28 @@ function sA:EditAura(id)
 		ed.dual:Hide()
 		ed.dualLabel:Hide()
 		ed.showCD:Show()
+		if ed.nameHint then ed.nameHint:SetText("") end
+	elseif aura.type == "Reactive" then
+		ed.unitLabel:Hide()
+		ed.unitButton:Hide()
+		ed.invert:Hide()
+		ed.invertLabel:Hide()
+		ed.dual:Hide()
+		ed.dualLabel:Hide()
+		ed.showCD:Hide()
+		if ed.nameHint then 
+			ed.nameHint:SetText("Proc-based spells (Riposte, Overpower, etc)")
+		end
+	else
+		-- Buff/Debuff: show all options
+		if ed.unitLabel then ed.unitLabel:Show() end
+		if ed.unitButton then ed.unitButton:Show() end
+		ed.invert:Show()
+		ed.invertLabel:Show()
+		ed.dual:Show()
+		ed.dualLabel:Show()
+		ed.showCD:Hide()
+		if ed.nameHint then ed.nameHint:SetText("") end
 	end
 
     -- Delete / Close / Copy buttons

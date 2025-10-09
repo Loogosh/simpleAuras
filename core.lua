@@ -82,6 +82,198 @@ function sA:GetCooldownInfo(spellName)
 end
 
 -------------------------------------------------
+-- Reactive spell info (proc-based abilities)
+-- Returns: spellID (index in spellbook), texture
+-- Note: IsUsableSpell() doesn't exist in Vanilla 1.12!
+-- We rely on COMBAT_TEXT_UPDATE for activation detection
+-------------------------------------------------
+function sA:GetReactiveInfo(spellName)
+  -- Find spell in spellbook and get texture for icon autodetect
+  local i = 1
+  while true do
+    local name = GetSpellName(i, "spell")
+    if not name then break end
+
+    if name == spellName then
+      local texture = GetSpellTexture(i, "spell")
+      return i, texture
+    end
+    i = i + 1
+  end
+  
+  -- Not found in spellbook - spell doesn't exist for this character
+  return nil, nil
+end
+
+-------------------------------------------------
+-- Handle reactive spell activation (from COMBAT_TEXT_UPDATE)
+-- This is called when a specific reactive ability becomes available
+-------------------------------------------------
+function sA:HandleReactiveActivation(spellName)
+  if not spellName or spellName == "" then return end
+  if not simpleAuras or not simpleAuras.auras then return end
+  
+  local currentTime = GetTime()
+  local knownDuration = simpleAuras.reactiveDurations[spellName]
+  
+  -- Find auras tracking this reactive spell
+  for id, aura in ipairs(simpleAuras.auras) do
+    if aura and aura.name == spellName and aura.type == "Reactive" then
+      
+      -- Initialize state
+      sA.reactiveTimers[spellName] = sA.reactiveTimers[spellName] or {
+        expiry = nil,
+        warnedOnce = false
+      }
+      
+      local state = sA.reactiveTimers[spellName]
+      
+      -- Get spell info (texture)
+      local spellID, texture = self:GetReactiveInfo(spellName)
+      
+      if spellID and texture then
+        
+        if knownDuration then
+          -- Duration is known, set/refresh timer
+          -- COMBAT_TEXT_UPDATE only fires on actual proc activation, so always update
+          local oldExpiry = state.expiry
+          
+          state.expiry = currentTime + knownDuration
+          state.warnedOnce = false
+          
+          -- Auto-detect texture (always update from spellbook)
+          if texture and (aura.autodetect == 1 or aura.texture == "Interface\\Icons\\INV_Misc_QuestionMark") then
+            aura.texture = texture
+            simpleAuras.auras[id].texture = texture
+          end
+          
+          -- Update cache for immediate rendering
+          sA.activeAuras[id] = sA.activeAuras[id] or {}
+          sA.activeAuras[id].active = true
+          sA.activeAuras[id].expiry = state.expiry
+          sA.activeAuras[id].icon = texture
+          sA.activeAuras[id].stacks = 0
+          sA.activeAuras[id].lastScan = currentTime
+          
+          if simpleAuras.showlearning == 1 then
+            local remaining = oldExpiry and (oldExpiry - currentTime) or 0
+            if oldExpiry and oldExpiry > currentTime then
+              sA:Msg("Reactive '" .. spellName .. "' REFRESHED! Was: " .. floor(remaining + 0.5) .. "s remaining → Now: " .. knownDuration .. "s")
+            else
+              sA:Msg("Reactive '" .. spellName .. "' ACTIVATED - timer: " .. knownDuration .. "s")
+            end
+          end
+          
+        else
+          -- Duration unknown - show warning ONCE
+          if not state.warnedOnce then
+            sA:Msg("Reactive spell '" .. spellName .. "' needs manual duration setup!")
+            sA:Msg("Use: /sa reactduration \"" .. spellName .. "\" X")
+            sA:Msg("Common durations: Riposte/Overpower=5s, Surprise Attack=6s")
+            state.warnedOnce = true
+          end
+          
+          -- Don't show icon without duration
+          sA.activeAuras[id] = sA.activeAuras[id] or {}
+          sA.activeAuras[id].active = false
+          sA.activeAuras[id].expiry = nil
+        end
+      else
+        -- Spell not found or no texture
+        if simpleAuras.showlearning == 1 then
+          sA:Msg("ERROR: Spell '" .. spellName .. "' not found in spellbook!")
+          sA:Msg("Make sure spell name is correct and you have it in your spellbook.")
+        end
+      end
+      
+      break  -- Found the aura, no need to continue
+    end
+  end
+end
+
+-------------------------------------------------
+-- Handle reactive spell usage (from UNIT_CASTEVENT)
+-- This is called when player casts a spell - checks if it's an active reactive spell
+-------------------------------------------------
+function sA:HandleReactiveSpellUsed(spellName)
+  if not spellName or spellName == "" then return end
+  
+  local state = sA.reactiveTimers[spellName]
+  
+  -- Check if this reactive spell is currently active
+  if state and state.expiry and state.expiry > GetTime() then
+    -- Deactivate the reactive spell
+    state.expiry = nil
+    
+    -- Update cache
+    for id, aura in ipairs(simpleAuras.auras or {}) do
+      if aura and aura.name == spellName and aura.type == "Reactive" then
+        sA.activeAuras[id] = sA.activeAuras[id] or {}
+        sA.activeAuras[id].active = false
+        sA.activeAuras[id].expiry = nil
+        
+        if simpleAuras.showlearning == 1 then
+          sA:Msg("Reactive spell '" .. spellName .. "' used - deactivated")
+        end
+        break
+      end
+    end
+  end
+end
+
+-------------------------------------------------
+-- Update reactive spell data (periodic scan - checks expiration only)
+-- This function monitors reactive spell state
+-- Main activation is handled by COMBAT_TEXT_UPDATE → HandleReactiveActivation()
+-- Duration must be set manually via /sa reactduration
+-------------------------------------------------
+function sA:UpdateReactiveData()
+  if not simpleAuras or not simpleAuras.auras then return end
+  
+  local currentTime = GetTime()
+  
+  for id, aura in ipairs(simpleAuras.auras) do
+    if aura and aura.name and aura.name ~= "" and aura.type == "Reactive" then
+      
+      local spellID, texture = self:GetReactiveInfo(aura.name)
+      local state = sA.reactiveTimers[aura.name]
+      
+      if state and state.expiry then
+        
+        -- Check if timer expired naturally
+        if state.expiry < currentTime then
+          -- Proc expired - only update if was active
+          if sA.activeAuras[id] and sA.activeAuras[id].active then
+            state.expiry = nil
+            
+            sA.activeAuras[id].active = false
+            sA.activeAuras[id].expiry = nil
+          end
+          
+        else
+          -- Still active - only update cache if not already set or expiry changed
+          local needsUpdate = false
+          if not sA.activeAuras[id] or not sA.activeAuras[id].active then
+            needsUpdate = true
+          elseif sA.activeAuras[id].expiry ~= state.expiry then
+            needsUpdate = true
+          end
+          
+          if needsUpdate then
+            sA.activeAuras[id] = sA.activeAuras[id] or {}
+            sA.activeAuras[id].active = true
+            sA.activeAuras[id].expiry = state.expiry
+            sA.activeAuras[id].icon = texture
+            sA.activeAuras[id].stacks = 0
+            sA.activeAuras[id].lastScan = currentTime
+          end
+        end
+      end
+    end
+  end
+end
+
+-------------------------------------------------
 -- SuperWoW-aware aura search
 -------------------------------------------------
 local function find_aura(name, unit, auratype, myCast)
@@ -111,8 +303,8 @@ local function find_aura(name, unit, auratype, myCast)
 		
 		-- If myCast is enabled (1), only show player's own casts
 		if myCast == 1 then
-			if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][sid] and sA.auraTimers[unitGUID][sid].castby and sA.auraTimers[unitGUID][sid].castby == sA.playerGUID
-			or (unit == "Player") then
+		if sA.auraTimers[unitGUID] and sA.auraTimers[unitGUID][sid] and sA.auraTimers[unitGUID][sid].castby and sA.auraTimers[unitGUID][sid].castby == sA.playerGUID
+		or (unit == "Player") then
 				return true, stacks, sid, rem, tex
 			end
 		else
@@ -121,7 +313,7 @@ local function find_aura(name, unit, auratype, myCast)
 		end
       end
       i = i + 1
-    end
+	end
     return false
   end
 
@@ -327,6 +519,7 @@ function sA:InitializeAuraCache()
   self:UpdateAuraDataForUnit("Player")
   self:UpdateAuraDataForUnit("Target")
   self:UpdateCooldownData()
+  self:UpdateReactiveData()
 end
 
 -------------------------------------------------
@@ -343,8 +536,8 @@ function sA:UpdateAuraDataForUnit(unitFilter)
   local currentTime = GetTime()
   
   for id, aura in ipairs(simpleAuras.auras) do
-    -- Only process auras for this unit
-    if aura and aura.name and aura.name ~= "" and aura.unit == unitFilter and aura.type ~= "Cooldown" then
+    -- Only process auras for this unit (skip Cooldown and Reactive - they have their own handlers)
+    if aura and aura.name and aura.name ~= "" and aura.unit == unitFilter and aura.type ~= "Cooldown" and aura.type ~= "Reactive" then
       
       -- Initialize cache entry
       sA.activeAuras[id] = sA.activeAuras[id] or {
@@ -494,7 +687,7 @@ function sA:UpdateAuras()
       local dragger   = self.draggers[id]   or CreateDraggerFrame(id, frame)
       self.frames[id] = frame
       self.draggers[id] = dragger
-      if aura.dual == 1 and aura.type ~= "Cooldown" then self.dualframes[id] = dualframe end
+      if aura.dual == 1 and aura.type ~= "Cooldown" and aura.type ~= "Reactive" then self.dualframes[id] = dualframe end
       
       local isEnabled = (aura.enabled == nil or aura.enabled == 1)
       local shouldShow
@@ -539,15 +732,18 @@ function sA:UpdateAuras()
               icon = auraData.icon
               stacks = auraData.stacks
               spellID = auraData.spellID
-              
-              -- Apply inversion logic
-              if aura.type == "Cooldown" then
-                local onCooldown = duration and duration > 0
-                show = (((aura.showCD == "No CD" or aura.showCD == "Always") and not onCooldown) or ((aura.showCD == "CD" or aura.showCD == "Always") and onCooldown)) and 1 or 0
-              elseif aura.invert == 1 then
-                show = 1 - auraIsPresent
-              else
+            
+            -- Apply inversion logic
+            if aura.type == "Cooldown" then
+              local onCooldown = duration and duration > 0
+              show = (((aura.showCD == "No CD" or aura.showCD == "Always") and not onCooldown) or ((aura.showCD == "CD" or aura.showCD == "Always") and onCooldown)) and 1 or 0
+              elseif aura.type == "Reactive" then
+                -- For reactive spells: show when proc is ready
                 show = auraIsPresent
+            elseif aura.invert == 1 then
+              show = 1 - auraIsPresent
+            else
+              show = auraIsPresent
               end
             end
           end
@@ -586,18 +782,19 @@ function sA:UpdateAuras()
           end
           
           if shouldUpdateText then
-            if sA.SuperWoW and sA.learnNew[spellID] and sA.learnNew[spellID] == 1 then
-              currentDurationtext = "learning"
-            elseif currentDuration > 100 then
-              currentDurationtext = floor(currentDuration / 60 + 0.5) .. "m"
-            elseif currentDuration <= (aura.lowdurationvalue or 5) then
-              currentDurationtext = format("%.1f", floor(currentDuration * 10 + 0.5) / 10)
-            else
-              currentDurationtext = floor(currentDuration + 0.5)
-            end
-            
-            if currentDurationtext == "0.0" then
-              currentDurationtext = 0
+            -- Check for learning state
+          if sA.SuperWoW and sA.learnNew[spellID] and sA.learnNew[spellID] == 1 then
+			currentDurationtext = "learning"
+          elseif currentDuration > 100 then
+            currentDurationtext = floor(currentDuration / 60 + 0.5) .. "m"
+		  elseif currentDuration <= (aura.lowdurationvalue or 5) then
+            currentDurationtext = format("%.1f", floor(currentDuration * 10 + 0.5) / 10)
+          else
+            currentDurationtext = floor(currentDuration + 0.5)
+        end
+
+        if currentDurationtext == "0.0" then
+          currentDurationtext = 0
             end
             
             frame.lastDisplayedTime = currentDuration
@@ -611,19 +808,25 @@ function sA:UpdateAuras()
         -- Apply visuals
         -------------------------------------------------
         local scale = aura.scale or 1
+        local textscale = scale
 		if currentDurationtext == "learning" then
 			textscale = scale/2
-		else
-			textscale = scale
 		end
         frame:SetPoint("CENTER", UIParent, "CENTER", aura.xpos or 0, aura.ypos or 0)
         frame:SetFrameLevel(128 - id)
         frame:SetWidth(48 * scale)
   	    frame:SetHeight(48 * scale)
-        frame.texture:SetTexture(aura.texture)
+        
+        -- For Reactive: use icon from cache if available
+        local textureToUse = aura.texture
+        if aura.type == "Reactive" and icon then
+          textureToUse = icon
+        end
+        
+        frame.texture:SetTexture(textureToUse)
         
         -- Smart text updates (only if changed)
-        if aura.duration == 1 and (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown") then
+        if aura.duration == 1 and (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown" or aura.type == "Reactive") then
           if frame.durationtext:GetText() ~= currentDurationtext then
             frame.durationtext:SetText(currentDurationtext)
           end
@@ -655,17 +858,21 @@ function sA:UpdateAuras()
 
         local durationcolor = {1.0, 0.82, 0.0, alpha}
         local stackcolor    = {1, 1, 1, alpha}
-        if (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown") and (currentDuration and currentDuration <= (aura.lowdurationvalue or 5)) and currentDurationtext ~= "learning" then
+        if (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown" or aura.type == "Reactive") and (currentDuration and currentDuration <= (aura.lowdurationvalue or 5)) and currentDurationtext ~= "learning" then
           durationcolor = {1, 0, 0, alpha}
         end
         frame.durationtext:SetTextColor(unpack(durationcolor))
         frame.stackstext:SetTextColor(unpack(stackcolor))
-        frame:Show()
+        
+        -- Only call Show() if not already visible (prevents flickering)
+        if not frame:IsShown() then
+          frame:Show()
+        end
 
         -------------------------------------------------
         -- Dual frame
         -------------------------------------------------
-        if aura.dual == 1 and aura.type ~= "Cooldown" and dualframe then
+        if aura.dual == 1 and aura.type ~= "Cooldown" and aura.type ~= "Reactive" and dualframe then
           dualframe:SetPoint("CENTER", UIParent, "CENTER", -(aura.xpos or 0), aura.ypos or 0)
           dualframe:SetFrameLevel(128 - id)
           dualframe:SetWidth(48 * scale)
@@ -676,7 +883,7 @@ function sA:UpdateAuras()
           else
             dualframe.texture:SetVertexColor(r, g, b, alpha)
           end
-          dualframe.durationtext:SetText((aura.duration == 1 and (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown")) and currentDurationtext or "")
+          dualframe.durationtext:SetText((aura.duration == 1 and (sA.SuperWoW or aura.unit == "Player" or aura.type == "Cooldown" or aura.type == "Reactive")) and currentDurationtext or "")
           dualframe.stackstext:SetText((aura.stacks == 1) and currentStacks or "")
           if aura.duration == 1 then dualframe.durationtext:SetFont(FONT, 20 * scale, "OUTLINE") end
           if aura.stacks   == 1 then dualframe.stackstext:SetFont(FONT, 14 * scale, "OUTLINE") end
@@ -686,8 +893,13 @@ function sA:UpdateAuras()
           dualframe:Hide()
         end
       else
-        if frame     then frame:Hide()     end
-        if dualframe then dualframe:Hide() end
+        -- Only hide if currently shown (prevents unnecessary operations)
+        if frame and frame:IsShown() then
+          frame:Hide()
+        end
+        if dualframe and dualframe:IsShown() then
+          dualframe:Hide()
+        end
       end
     else
       -- This is a new/empty aura, make sure its frame is hidden if it exists

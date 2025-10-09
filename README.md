@@ -14,15 +14,25 @@
 - Learning new AuraDuration gets prematurely completed if another player's aura with the same name runs out on the same target before yours - no way to get casterID when an aura fades.
 - Skills that apply Auras with the same name may show "learning" all the time (maybe this one is fixed now - wasn't able to test yet).
 - Having more than 16 auras shows auras outside the GUI frame (scrollframe possible, but then has more/other issues)
-- AddOn is kinda heavy on ressources (compared to other addons), will optimize in a future update.
 - /sa learnall 1 tries to learn spells without aura (i.e. smite, shadowbolt, etc.)
+- Reactive Spells require manual duration setup - no auto-learning available (Vanilla API limitation)
 
 
 ## Console Commands:
 /sa or /sa show or /sa hide - Show/hide simpleAuras Settings.
 
-/sa refresh X - Set refresh rate. (1 to 10 updates per second. Default: 5).
-It only affects the data update time, the GUI is always drawn at 20
+/sa refresh X - Set aura data scan rate. (1 to 10 scans per second. Default: 5). GUI always renders at 20 FPS.
+
+### Reactive Spells (Surprise Attack, Overpower, etc):
+/sa reactduration SpellName Duration - manually set reactive spell duration (REQUIRED for reactive spells to work).
+
+/sa reactduration SpellID Duration - or use spell ID instead of name.
+
+/sa forget react SpellName - forget reactive spell duration (or 'all' to delete all).
+
+**Example:** /sa reactduration Surprise Attack 5
+
+
 
 ### SuperWoW commands:
 /sa learn X Y - manually set duration Y of spellID X.
@@ -75,8 +85,8 @@ Icon/Texture:
 
 
 Conditions:
-- Unit: Which unit the aura is on.
-- Type: is it a buff or a debuff.
+- Unit: Which unit the aura is on (Player/Target).
+- Type: Buff, Debuff, Cooldown, or Reactive.
 - Low Duration Color*: If the auracolor should change at or below "lowduration"
 - Low Duration in secs*: Allways active, changes durationcolor to red if at or below, also changes color if activated.
 - In/Out of Combat: When aura should be shown
@@ -91,6 +101,13 @@ Cooldown:
 - No CD: Show when not on CD.
 - CD: Show when on CD.
 
+Reactive:
+- Tracks proc-based abilities (Riposte, Overpower, Revenge, Surprise Attack, etc).
+- **IMPORTANT:** You MUST set duration manually using `/sa reactduration SpellName Duration`.
+- Shows timer when proc is active.
+- Automatically refreshes on repeated procs.
+- Examples: Riposte (5s), Overpower (5s), Surprise Attack (6s).
+
 
 Other:
 - [c] / Copy: Copies the aura.
@@ -99,6 +116,45 @@ Other:
 
 \* = For these functions to work on targets SuperWoW is REQUIRED! Also only shows your own AuraDurations.
 
+
+## Reactive Spells Setup (Riposte, Overpower, etc)
+
+Reactive spells are proc-based abilities that become available after specific events (dodge, parry, block). Unlike buffs and cooldowns, they require **manual duration setup**.
+
+### How to set up:
+
+1. **Create the aura:**
+   - Type: `Reactive`
+   - Aura Name: Exact spell name (e.g., `Riposte`, `Surprise Attack`)
+   - Enable: `Show Duration`
+   - Conditions: Set as needed (In Combat, etc)
+
+2. **Set duration manually (REQUIRED):**
+   ```
+   /sa reactduration Riposte 5
+   /sa reactduration "Surprise Attack" 6
+   ```
+   Or use spell ID:
+   ```
+   /sa reactduration 14251 5
+   ```
+
+3. **Manage saved durations:**
+   ```
+   /sa forget react Riposte          -- Remove specific spell
+   /sa forget react all               -- Remove all reactive durations
+   ```
+
+4. **Test it:**
+   - Wait for proc to trigger (dodge/parry/block)
+   - Icon will appear with timer countdown
+   - Timer refreshes on repeated procs (when detected)
+   - Icon disappears when you use the ability or timer expires
+
+### Known Limitations:
+- **Manual duration required:** Vanilla API doesn't provide proc expiration events.
+- **Refresh detection:** `COMBAT_TEXT_UPDATE` only fires when ability *becomes* available, not on subsequent procs while already active. This means not all repeated procs within the duration window will be detected for refresh.
+- **Workaround:** For 100% proc tracking, you could extend the code to parse `CHAT_MSG_COMBAT_SELF_MISSES` for dodge/parry/block events and manually refresh timers.
 
 ## SuperWoW Features
 If SuperWoW is installed, simpleAuras will automatically learn unkown durations of most of **your own** auras with the first cast (needs to run out to be accurate).

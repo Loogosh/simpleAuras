@@ -6,22 +6,32 @@ f:SetScript("OnEvent", function()
 		-- SavedVariables Initialization
 		---------------------------------------------------
 
+<<<<<<< Updated upstream
 		-- Ensure tables exist
 		simpleAuras = simpleAuras or {}
 		simpleAuras.auras   = simpleAuras.auras   or {}
 		simpleAuras.refresh = simpleAuras.refresh or 5
-		simpleAuras.reactiveDurations = simpleAuras.reactiveDurations or {}  -- Reactive spell durations
 		if sA.SuperWoW then
 		  simpleAuras.auradurations = simpleAuras.auradurations or {}
 		  simpleAuras.updating      = simpleAuras.updating or 0
 		  simpleAuras.showlearning  = simpleAuras.showlearning or 0
 		  simpleAuras.learnall      = simpleAuras.learnall or 0
 		end
+=======
+	-- Ensure tables exist
+	simpleAuras = simpleAuras or {}
+	simpleAuras.auras   = simpleAuras.auras   or {}
+	simpleAuras.refresh = simpleAuras.refresh or 5
+	simpleAuras.reactiveDurations = simpleAuras.reactiveDurations or {}  -- Reactive spell durations
+	if sA.SuperWoW then
+	  simpleAuras.auradurations = simpleAuras.auradurations or {}
+	  simpleAuras.updating      = simpleAuras.updating or 0
+	  simpleAuras.showlearning  = simpleAuras.showlearning or 0
+	  simpleAuras.learnall      = simpleAuras.learnall or 0
+	end
+>>>>>>> Stashed changes
 		
 		sA.SettingsLoaded = 1
-		
-		-- Initialize aura cache on load
-		sA:InitializeAuraCache()
 		
 		sA:CreateTestAuras()
 
@@ -31,6 +41,9 @@ f:SetScript("OnEvent", function()
 end)
 
 -- runtime only
+<<<<<<< Updated upstream
+sA = sA or { auraTimers = {}, learnCastTimers = {}, learnNew = {}, frames = {}, dualframes = {}, draggers = {} }
+=======
 sA = sA or { 
   auraTimers = {}, 
   learnCastTimers = {}, 
@@ -39,12 +52,14 @@ sA = sA or {
   dualframes = {}, 
   draggers = {}, 
   activeAuras = {},
-  reactiveTimers = {}       -- [spellName] = {expiry, warnedOnce}
+  reactiveTimers = {},      -- [spellName] = {expiry, warnedOnce}
+  itemIDCache = {}          -- [itemName] = itemID (for cooldown tracking)
 }
 
 -- Get version from .toc file using WoW API
 sA.VERSION = GetAddOnMetadata("simpleAuras", "Version") or "1.0"
 
+>>>>>>> Stashed changes
 sA.SuperWoW = SetAutoloot and true or false
 local _, playerGUID = UnitExists("player")
 sA.playerGUID = playerGUID
@@ -60,7 +75,7 @@ local getn   = table.getn
 local GetTime = GetTime
 
 -- message helper
-sA.PREFIX = "|c194b7dccsimple|cffffffffAuras v" .. (sA.VERSION or "1.0") .. ": "
+sA.PREFIX = "|c194b7dccsimple|cffffffffAuras: "
 function sA:Msg(msg)
   DEFAULT_CHAT_FRAME:AddMessage(self.PREFIX .. msg)
 end
@@ -127,11 +142,9 @@ if sA.SuperWoW then
               simpleAuras.auradurations[spellID][casterGUID] = floor(actual + 0.5)
 			  sA.learnNew[spellID] = nil
               if simpleAuras.updating == 1 then
-                local casterType = (casterGUID == sA.playerGUID) and "your" or "ally's"
-                sA:Msg("Updated " .. casterType .. " " .. spellName .. " (ID:"..spellID..") to: " .. floor(actual + 0.5) .. "s")
+                sA:Msg("Updated " .. spellName .. " (ID:"..spellID..") to: " .. floor(actual + 0.5) .. "s")
               elseif simpleAuras.showlearning == 1 then
-                local casterType = (casterGUID == sA.playerGUID) and "your" or "ally's"
-				sA:Msg("Learned " .. casterType .. " " .. spellName .. " (ID:"..spellID..") duration: " .. floor(actual + 0.5) .. "s")
+				sA:Msg("Learned " .. spellName .. " (ID:"..spellID..") duration: " .. floor(actual + 0.5) .. "s")
 			  end
               sA.learnCastTimers[targetGUID][spellID].duration = nil
               sA.learnCastTimers[targetGUID][spellID].castby = nil
@@ -154,19 +167,6 @@ if sA.SuperWoW then
       if evType ~= "CAST" or not spellID then return end
 	  
       local spellName = SpellInfo(spellID)
-      
-      -- Check if player used a reactive spell (before aura learning logic)
-      if sA.playerGUID then
-        sA.playerGUID = gsub(sA.playerGUID, "^0x", "")
-      else
-        local _, playerGUID = UnitExists("player")
-        sA.playerGUID = playerGUID
-      end
-      local checkCasterGUID = gsub(casterGUID or "", "^0x", "")
-      if checkCasterGUID == sA.playerGUID and spellName then
-        sA:HandleReactiveSpellUsed(spellName)
-      end
-      
 	  local auraIDs = getAuraID(spellName)
 
 	  if ((auraIDs and getn(auraIDs) > 0) or simpleAuras.learnall == 1) and spellID then
@@ -183,8 +183,7 @@ if sA.SuperWoW then
 
 		  local dur = GetAuraDurationBySpellID(spellID,casterGUID)
 	  
-		  if dur and dur > 0 and simpleAuras.updating == 0 then
-			-- Use known duration from any caster (not just player)
+		  if dur and dur > 0 and simpleAuras.updating == 0 and casterGUID == sA.playerGUID then
 			sA.auraTimers[targetGUID] = sA.auraTimers[targetGUID] or {}
 			sA.auraTimers[targetGUID][spellID] = sA.auraTimers[targetGUID][spellID] or {}
 			if not sA.auraTimers[targetGUID][spellID].duration or (dur + timestamp) > sA.auraTimers[targetGUID][spellID].duration then
@@ -192,8 +191,7 @@ if sA.SuperWoW then
 				sA.auraTimers[targetGUID][spellID].castby = casterGUID
 			end
 			sA.learnNew[spellID] = nil
-		  else
-			-- Learn duration from any caster (not just player)
+		  elseif casterGUID == sA.playerGUID then
 
 			local showLearn = nil
 						
@@ -216,18 +214,14 @@ if sA.SuperWoW then
 				end
 			end
 						
-			-- Show learning notification for any caster if aura is tracked
-			if showLearn and targetGUID ~= sA.playerGUID then
+			if showLearn and casterGUID == sA.playerGUID and targetGUID ~= sA.playerGUID then
 				sA.learnNew[spellID] = 1
 			end
 			
-			-- Display learning message for any caster
 			if simpleAuras.updating == 1 then
-			  local casterName = (casterGUID == sA.playerGUID) and "your" or "ally's"
-			  sA:Msg("Updating " .. casterName .. " " .. (spellName or spellID) .. " (ID:"..spellID..")...")
+			  sA:Msg("Updating " .. (spellName or spellID) .. " (ID:"..spellID..")...")
 			elseif simpleAuras.showlearning == 1 then
-			  local casterName = (casterGUID == sA.playerGUID) and "your" or "ally's"
-			  sA:Msg("Learning " .. casterName .. " " .. (spellName or spellID) .. " (ID:"..spellID..")...")
+			  sA:Msg("Learning " .. (spellName or spellID) .. " (ID:"..spellID..")...")
 			end
 			
 		  end
@@ -238,44 +232,13 @@ if sA.SuperWoW then
   end)
 end
 
--- Periodic data updates (controlled by /sa refresh setting)
--- This is the HEAVY operation: scans UnitBuff, UnitDebuff, GetSpellCooldown
-local sADataUpdate = CreateFrame("Frame", "sADataUpdate", UIParent)
-sADataUpdate:SetScript("OnUpdate", function()
-	if not sA.SettingsLoaded then return end
-	
-	local time = GetTime()
-	-- Frequency controlled by simpleAuras.refresh (1-10 per second)
-	local dataRefreshRate = 1 / (simpleAuras.refresh or 5)
-	if (time - (sADataUpdate.lastUpdate or 0)) < dataRefreshRate then return end
-	
-	sADataUpdate.lastUpdate = time
-	
-	-- Rescan auras (catches missed events + provides periodic fallback)
-	sA:UpdateAuraDataForUnit("Player")
-	if UnitExists("target") then
-		sA:UpdateAuraDataForUnit("Target")
-	else
-		-- Clear target auras if no target exists
-		for id, aura in ipairs(simpleAuras.auras or {}) do
-			if aura and aura.unit == "Target" and sA.activeAuras[id] then
-				sA.activeAuras[id].active = false
-				sA.activeAuras[id].expiry = nil
-			end
-		end
-	end
-	sA:UpdateCooldownData()
-	sA:UpdateReactiveData()
-end)
-
--- GUI rendering updates (fixed at 20 FPS for smooth animations)
--- This is LIGHT operation: only math (expiry - GetTime) and text updates
+-- Timed updates
 local sAEvent = CreateFrame("Frame", "sAEvent", UIParent)
 sAEvent:SetScript("OnUpdate", function()
 
 	local time = GetTime()
-	local guiRefreshRate = 1 / 20  -- Fixed 20 FPS (0.05 seconds)
-	if (time - (sAEvent.lastUpdate or 0)) < guiRefreshRate then return end
+	local refreshRate = 1 / (simpleAuras.refresh or 5)
+	if (time - (sAEvent.lastUpdate or 0)) < refreshRate then return end
 		
   -- Cache the UI scale in a safe context
   sA.uiScale = UIParent:GetEffectiveScale()
@@ -341,7 +304,6 @@ sAEvent:SetScript("OnUpdate", function()
   end
 		
   sAEvent.lastUpdate = time
-  -- Only render GUI, don't fetch data here
   sA:UpdateAuras()
 		
 end)
@@ -358,6 +320,8 @@ sACombat:SetScript("OnEvent", function()
   end
 end)
 
+<<<<<<< Updated upstream
+=======
 -- Aura tracking events (event-driven updates)
 local sAAuraTracker = CreateFrame("Frame")
 sAAuraTracker:RegisterEvent("UNIT_AURA")
@@ -366,6 +330,9 @@ sAAuraTracker:RegisterEvent("PLAYER_TARGET_CHANGED")
 sAAuraTracker:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 sAAuraTracker:RegisterEvent("SPELL_UPDATE_USABLE")
 sAAuraTracker:RegisterEvent("COMBAT_TEXT_UPDATE")
+sAAuraTracker:RegisterEvent("BAG_UPDATE")
+sAAuraTracker:RegisterEvent("BAG_UPDATE_COOLDOWN")
+sAAuraTracker:RegisterEvent("UNIT_INVENTORY_CHANGED")
 sAAuraTracker:SetScript("OnEvent", function()
   if not sA.SettingsLoaded then return end
   
@@ -395,9 +362,15 @@ sAAuraTracker:SetScript("OnEvent", function()
       sA:UpdateAuraDataForUnit("Target")
     end
     
-  elseif event == "SPELL_UPDATE_COOLDOWN" then
-    -- Update all cooldown-type auras
+  elseif event == "SPELL_UPDATE_COOLDOWN" or event == "BAG_UPDATE" or event == "BAG_UPDATE_COOLDOWN" then
+    -- Update all cooldown-type auras (spells and items)
     sA:UpdateCooldownData()
+    
+  elseif event == "UNIT_INVENTORY_CHANGED" then
+    -- Equipped items changed (trinkets, etc)
+    if arg1 == "player" then
+      sA:UpdateCooldownData()
+    end
     
   elseif event == "SPELL_UPDATE_USABLE" then
     -- Update reactive spell states (proc-based abilities)
@@ -423,6 +396,7 @@ sAAuraTracker:SetScript("OnEvent", function()
   end
 end)
 
+>>>>>>> Stashed changes
 ---------------------------------------------------
 -- Slash Commands
 ---------------------------------------------------
@@ -435,20 +409,12 @@ SlashCmdList["sA"] = function(msg)
 		msg = ""
 	end
 
-	-- Get Command Arguments (improved parser for multi-word args)
-	local cmd, val, fad, restOfMsg
-	-- Extract first word as command, rest as args
-	cmd = string.match(msg, "^(%S+)")
-	restOfMsg = string.match(msg, "^%S+%s+(.*)$")
-	
-	if not cmd then cmd = "" end
-	if not restOfMsg then restOfMsg = "" end
-	
-	-- For backward compatibility: try to extract val and fad from restOfMsg
-	local s, e, a, b = string.find(restOfMsg, "^(%S*)%s*(%S*)$")
-	if a then val = a else val = "" end
-	if b then fad = b else fad = "" end
-	
+	-- Get Command Arguments
+	local cmd, val
+	local s, e, a, b, c = string.find(msg, "^(%S+)%s*(%S*)%s*(%S*)$")
+	if a then cmd = a else cmd = "" end
+	if b then val = b else val = "" end
+	if c then fad = c else fad = "" end
 	
 	-- hide / show or no command
 	if cmd == "" or cmd == "show" or cmd == "hide" then
@@ -469,11 +435,10 @@ SlashCmdList["sA"] = function(msg)
 		local num = tonumber(val)
 		if num and num >= 1 and num <= 10 then
 			simpleAuras.refresh = num
-			sA:Msg("Data scan rate set to " .. num .. " times per second")
+			sA:Msg("Refresh set to " .. num .. " times per second")
 		else
-			sA:Msg("Usage: /sa refresh X - set aura data scan rate. (1 to 10 scans per second. Default: 5).")
-			sA:Msg("Note: GUI always renders at 20 FPS. This controls how often aura data is fetched.")
-			sA:Msg("Current scan rate = " .. simpleAuras.refresh .. " times per second.")
+			sA:Msg("Usage: /sa refresh X - set refresh rate. (1 to 10 updates per second. Default: 5).")
+			sA:Msg("Current refresh = " .. simpleAuras.refresh .. " times per second.")
 		end
 		return
 	end
@@ -502,8 +467,7 @@ SlashCmdList["sA"] = function(msg)
 			simpleAuras.updating = num
 			sA:Msg("Aura durations update status set to " .. num)
 		else
-			sA:Msg("Usage: /sa update X - force aura durations updates (1 = re-learn durations. Default: 0).")
-			sA:Msg("Note: Reactive spells use manual duration setting (/sa reactduration).")
+			sA:Msg("Usage: /sa update X - force aura durations updates (1 = re-learn aura durations. Default: 0).")
 			sA:Msg("Current update status = " .. simpleAuras.updating)
 		end
 		return
@@ -531,6 +495,13 @@ SlashCmdList["sA"] = function(msg)
 	
 	-- track others
 	if cmd == "showlearning" then
+<<<<<<< Updated upstream
+		if sA.SuperWoW then
+			local num = tonumber(val)
+			if num and (num == 0 or num == 1) then
+				simpleAuras.showlearning = num
+				sA:Msg("ShowLearning status set to " .. num)
+=======
 		local num = tonumber(val)
 		if num and (num == 0 or num == 1) then
 			simpleAuras.showlearning = num
@@ -580,41 +551,20 @@ SlashCmdList["sA"] = function(msg)
 				else
 					sA:Msg("Invalid spell name/ID!")
 				end
+>>>>>>> Stashed changes
 			else
-				sA:Msg("Invalid duration!")
+				sA:Msg("Usage: /sa showlearning X - shows learning of new AuraDurations in chat (1 = show. Default: 0).")
+				sA:Msg("Current ShowLearning status = " .. simpleAuras.showlearning)
 			end
+			return
 		else
-			sA:Msg("Usage: /sa reactduration SpellName Duration - manually set reactive spell duration.")
-			sA:Msg("Usage: /sa reactduration SpellID Duration - or use spell ID instead.")
-			sA:Msg("Example: /sa reactduration Riposte 5")
-			sA:Msg("Example: /sa reactduration Surprise Attack 6")
-			sA:Msg("Example: /sa reactduration 52531 6")
+			sA:Msg("/sa showlearning needs SuperWoW to be installed!")
 		end
 		return
 	end
 	
 	-- delete
 	if cmd == "forget" or cmd == "unlearn" or cmd == "delete" then
-		-- Check if forgetting reactive spell
-		if val == "react" or val == "reactive" then
-			if fad == "all" then
-				simpleAuras.reactiveDurations = {}
-				sA:Msg("Forgot all learned Reactive spell durations.")
-			elseif fad and fad ~= "" then
-				if simpleAuras.reactiveDurations[fad] then
-					simpleAuras.reactiveDurations[fad] = nil
-					sA:Msg("Forgot reactive duration for '" .. fad .. "'.")
-				else
-					sA:Msg("No learned duration for reactive spell '" .. fad .. "'.")
-				end
-			else
-				sA:Msg("Usage: /sa forget react SpellName - forget reactive spell duration.")
-				sA:Msg("Usage: /sa forget react all - forget all reactive durations.")
-			end
-			return
-		end
-		
-		-- SuperWoW aura durations
 		if sA.SuperWoW then
 			local arg = val
 			if val and val == "all" then
@@ -655,15 +605,8 @@ SlashCmdList["sA"] = function(msg)
 	-- help or unknown command fallback
 	sA:Msg("Usage:")
 	sA:Msg("/sa or /sa show or /sa hide - show/hide simpleAuras Settings.")
-	sA:Msg("/sa refresh X - set aura data scan rate. (1 to 10 scans per second. Default: 5). GUI renders at fixed 20 FPS.")
-	sA:Msg(" ")
-	sA:Msg("Reactive Spells (Riposte, Overpower, etc):")
-	sA:Msg("/sa reactduration SpellName Duration - manually set reactive spell duration.")
-	sA:Msg("/sa forget react SpellName - forget reactive spell duration (or 'all' to delete all).")
-	sA:Msg("/sa showlearning 1 - shows learning of reactive spell durations in chat.")
-	sA:Msg(" ")
+	sA:Msg("/sa refresh X - set refresh rate. (1 to 10 updates per second. Default: 5).")
 	if sA.SuperWoW then
-		sA:Msg("SuperWoW commands:")
 		sA:Msg("/sa learn X Y - manually set duration Y of spellID X.")
 		sA:Msg("/sa forget X - forget AuraDuration of SpellID X (or use 'all' instead to delete all durations).")
 		sA:Msg("/sa update X - force AuraDurations updates (1 = re-learn aura durations. Default: 0).")

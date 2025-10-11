@@ -114,7 +114,7 @@ if not gui then
 
   local title = gui:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("TOP", 0, -5)
-  title:SetText("simpleAuras")
+  title:SetText("simpleAuras v" .. (sA.VERSION or "1.0"))
 
   -- ScrollFrame for aura list
   gui.scrollFrame = CreateFrame("ScrollFrame", "sAGUIScrollFrame", gui)

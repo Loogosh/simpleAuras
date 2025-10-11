@@ -38,6 +38,9 @@ sA = sA or {
   itemIDCache = {}          -- [itemName] = itemID (for cooldown tracking)
 }
 
+-- Get version from .toc file
+sA.VERSION = GetAddOnMetadata("simpleAuras", "Version") or "1.0"
+
 sA.SuperWoW = SetAutoloot and true or false
 local _, playerGUID = UnitExists("player")
 sA.playerGUID = playerGUID

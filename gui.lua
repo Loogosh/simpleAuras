@@ -114,7 +114,7 @@ if not gui then
 
   local title = gui:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("TOP", 0, -5)
-  title:SetText("simpleAuras v" .. (sA.VERSION or "1.0"))
+  title:SetText("simpleAuras")
 
   gui:Hide()
   table.insert(UISpecialFrames, "sAGUI")
@@ -380,15 +380,9 @@ function sA:SaveAura(id)
   data.lowdurationvalue= tonumber(ed.lowdurationvalue:GetText())
   data.lowdurationcolor= ed.lowdurationcolor
   data.type            = ed.typeButton.text:GetText()
-  
-  -- Reactive spells are always Player spells
-  if data.type == "Reactive" then
-    data.unit = "Player"
-  else
-    data.unit = ed.unitButton.text:GetText()
-  end
-  
+  data.unit            = ed.unitButton.text:GetText()
   data.showCD          = ed.showCD.text:GetText()
+  data.equipped        = ed.equipped.value
   data.inCombat        = ed.inCombat.value
   data.outCombat       = ed.outCombat.value
   data.inRaid          = ed.inRaid.value
@@ -402,15 +396,6 @@ function sA:SaveAura(id)
   ed.x:ClearFocus()
   ed.y:ClearFocus()
   ed.lowdurationvalue:ClearFocus()
-
-  -- Update cache for this aura after saving changes
-  if data.type == "Cooldown" then
-    sA:UpdateCooldownData()
-  elseif data.type == "Reactive" then
-    sA:UpdateReactiveData()
-  else
-    sA:UpdateAuraDataForUnit(data.unit)
-  end
 
   if sA.TestAura then sA.TestAura:Hide() end
   if sA.TestAuraDual then sA.TestAuraDual:Hide() end
@@ -428,20 +413,8 @@ function sA:AddAura(copyId)
   if copyId and simpleAuras.auras[copyId] then
     simpleAuras.auras[newId] = deepCopy(simpleAuras.auras[copyId])
   else
-    simpleAuras.auras[newId] = {["enabled"]=1,["myCast"]=1,["name"]="",["auracolor"]={[1]=1,[2]=1,[3]=1,[4]=1},["autodetect"]=0,["texture"]="Interface\\Icons\\INV_Misc_QuestionMark",["scale"]=1,["xpos"]=0,["ypos"]=0,["duration"]=0,["stacks"]=0,["type"]="Buff",["unit"]="Player",["showCD"]="Always",["lowduration"]=0,["lowdurationcolor"]={[1]=1,[2]=0,[3]=0,[4]=1},["lowdurationvalue"]=5,["inCombat"]=1,["outCombat"]=1,["inParty"]=0,["inRaid"]=0,["invert"]=0,["dual"]=0}
+    simpleAuras.auras[newId] = {["enabled"]=1,["myCast"]=1,["name"]="",["auracolor"]={[1]=1,[2]=1,[3]=1,[4]=1},["autodetect"]=0,["texture"]="Interface\\Icons\\INV_Misc_QuestionMark",["scale"]=1,["xpos"]=0,["ypos"]=0,["duration"]=0,["stacks"]=0,["type"]="Buff",["unit"]="Player",["showCD"]="Always",["equipped"]=0,["lowduration"]=0,["lowdurationcolor"]={[1]=1,[2]=0,[3]=0,[4]=1},["lowdurationvalue"]=5,["inCombat"]=1,["outCombat"]=1,["inParty"]=0,["inRaid"]=0,["invert"]=0,["dual"]=0}
   end
-  
-  -- Initialize cache entry for new aura
-  sA.activeAuras[newId] = {
-    active = false,
-    expiry = nil,
-    stacks = 0,
-    icon = nil,
-    spellID = nil,
-    lastUpdate = 0,
-    lastScan = 0
-  }
-  
   if gui.editor and gui.editor:IsShown() then
     gui.editor:Hide()
     gui.editor = nil
@@ -530,12 +503,6 @@ function sA:EditAura(id)
     ed.nameLabel = ed:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     ed.nameLabel:SetPoint("TOPLEFT", ed.enabled, "BOTTOMLEFT", 0, -15)
     ed.nameLabel:SetText("Aura Name:")
-    
-    ed.nameHint = ed:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ed.nameHint:SetPoint("TOPLEFT", ed.nameLabel, "BOTTOMLEFT", 0, -2)
-    ed.nameHint:SetTextColor(0.7, 0.7, 0.7)
-    ed.nameHint:SetText("")
-    
     ed.name = CreateFrame("EditBox", nil, ed)
     ed.name:SetPoint("LEFT", ed.nameLabel, "RIGHT", 5, 0)
     ed.name:SetWidth(198)
@@ -756,7 +723,7 @@ function sA:EditAura(id)
         menu:SetFrameStrata("DIALOG")
         menu:SetFrameLevel(10)
         menu:SetWidth(80)
-        menu:SetHeight(80)
+        menu:SetHeight(40)
         sA:SkinFrame(menu, {0.15,0.15,0.15,1})
         menu:Hide()
         ed.typeButton.menu = menu
@@ -781,7 +748,6 @@ function sA:EditAura(id)
         makeChoice("Buff", 1)
         makeChoice("Debuff", 2)
         makeChoice("Cooldown", 3)
-        makeChoice("Reactive", 4)
       end
       local menu = ed.typeButton.menu
       if menu:IsVisible() then menu:Hide() else menu:Show() end
@@ -836,11 +802,36 @@ function sA:EditAura(id)
 	  if menu:IsVisible() then menu:Hide() else menu:Show() end
 	end)
 	
-	-- Cooldown option
+	-- Equipped checkbox (for Cooldown items like trinkets) - between Type and Always
+	ed.equipped = CreateFrame("Button", nil, ed)
+	ed.equipped:SetWidth(16)
+	ed.equipped:SetHeight(16)
+	ed.equipped:SetPoint("LEFT", ed.typeButton, "RIGHT", 10, 0)
+	sA:SkinFrame(ed.equipped, {0.15,0.15,0.15,1})
+	ed.equipped:SetScript("OnEnter", function() ed.equipped:SetBackdropColor(0.5,0.5,0.5,1) end)
+	ed.equipped:SetScript("OnLeave", function() ed.equipped:SetBackdropColor(0.15,0.15,0.15,1) end)
+	ed.equipped.checked = ed.equipped:CreateTexture(nil, "OVERLAY")
+	ed.equipped.checked:SetTexture("Interface\\Buttons\\WHITE8x8")
+	ed.equipped.checked:SetVertexColor(1,0.8,0.06,1)
+	ed.equipped.checked:SetPoint("CENTER", ed.equipped, "CENTER", 0, 0)
+	ed.equipped.checked:SetWidth(7)
+	ed.equipped.checked:SetHeight(7)
+	ed.equipped.value = 0
+	ed.equipped:SetScript("OnClick", function(self)
+	  ed.equipped.value = 1 - (ed.equipped.value or 0)
+	  if ed.equipped.value == 1 then ed.equipped.checked:Show() else ed.equipped.checked:Hide() end
+	  sA:SaveAura(id)
+	end)
+	ed.equippedLabel = ed:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	ed.equippedLabel:SetPoint("LEFT", ed.equipped, "RIGHT", 5, 0)
+	ed.equippedLabel:SetText("Equipped")
+	ed.equipped:Hide()
+
+	-- Cooldown option (Always/CD/No CD) - after Equipped checkbox
 	ed.showCD = CreateFrame("Button", nil, ed)
 	ed.showCD:SetWidth(80)
 	ed.showCD:SetHeight(20)
-	ed.showCD:SetPoint("LEFT", ed.typeButton, "RIGHT", 77, 0)
+	ed.showCD:SetPoint("LEFT", ed.equippedLabel, "RIGHT", 15, 0)
 	sA:SkinFrame(ed.showCD, {0.2,0.2,0.2,1})
 	ed.showCD.text = ed.showCD:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	ed.showCD.text:SetPoint("CENTER", ed.showCD, "CENTER", 0, 0)
@@ -1091,6 +1082,10 @@ function sA:EditAura(id)
 		ed.dual:Hide()
 		ed.dualLabel:Hide()
 		ed.showCD:Show()
+<<<<<<< Updated upstream
+=======
+		ed.equipped:Show()
+		ed.equippedLabel:Show()
 		if ed.nameHint then ed.nameHint:SetText("") end
 	elseif aura.type == "Reactive" then
 		ed.unitLabel:Hide()
@@ -1100,6 +1095,8 @@ function sA:EditAura(id)
 		ed.dual:Hide()
 		ed.dualLabel:Hide()
 		ed.showCD:Hide()
+		ed.equipped:Hide()
+		ed.equippedLabel:Hide()
 		if ed.nameHint then 
 			ed.nameHint:SetText("Proc-based spells (Riposte, Overpower, etc)")
 		end
@@ -1112,7 +1109,10 @@ function sA:EditAura(id)
 		ed.dual:Show()
 		ed.dualLabel:Show()
 		ed.showCD:Hide()
+		ed.equipped:Hide()
+		ed.equippedLabel:Hide()
 		if ed.nameHint then ed.nameHint:SetText("") end
+>>>>>>> Stashed changes
 	end
 
     -- Delete / Close / Copy buttons
@@ -1204,6 +1204,8 @@ function sA:EditAura(id)
   if ed.showCD then
 	ed.showCD.text:SetText(aura.showCD or "Always")
   end
+  ed.equipped.value = aura.equipped or 0
+  if ed.equipped.value == 1 then ed.equipped.checked:Show() else ed.equipped.checked:Hide() end
   ed.inCombat.value = aura.inCombat or 0
   if ed.inCombat.value == 1 then ed.inCombat.checked:Show() else ed.inCombat.checked:Hide() end
   ed.outCombat.value = aura.outCombat or 0
@@ -1289,11 +1291,6 @@ function sA:EditAura(id)
       sA.frames = {}
       sA.dualframes = {}
       sA.draggers = {}
-      
-      -- Rebuild cache after deletion (indices changed)
-      sA.activeAuras = {}
-      sA:InitializeAuraCache()
-      
       ed.confirm:Hide()
       ed:Hide()
       gui.editor = nil
@@ -1792,10 +1789,6 @@ function sA:ImportAuras(importString)
 
     if importedCount > 0 then
         sA:Msg(importedCount .. " aura(s) imported successfully.")
-        
-        -- Reinitialize cache for all auras after import
-        sA:InitializeAuraCache()
-        
 		if importedCount == 1 then
 			local newId = table.getn(simpleAuras.auras)
 			sA:EditAura(newId)

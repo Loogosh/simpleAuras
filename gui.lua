@@ -116,6 +116,33 @@ if not gui then
   title:SetPoint("TOP", 0, -5)
   title:SetText("simpleAuras")
 
+  -- ScrollFrame for aura list
+  gui.scrollFrame = CreateFrame("ScrollFrame", "sAGUIScrollFrame", gui)
+  gui.scrollFrame:SetPoint("TOPLEFT", 20, -30)
+  gui.scrollFrame:SetPoint("BOTTOMRIGHT", -20, 10)
+  
+  -- Content frame (holds the aura rows)
+  gui.scrollContent = CreateFrame("Frame", "sAGUIScrollContent", gui.scrollFrame)
+  gui.scrollContent:SetWidth(260)
+  gui.scrollContent:SetHeight(1) -- Will be adjusted dynamically
+  gui.scrollFrame:SetScrollChild(gui.scrollContent)
+  
+  -- MouseWheel support
+  gui.scrollFrame:EnableMouseWheel(true)
+  gui.scrollFrame:SetScript("OnMouseWheel", function()
+    local scroll = gui.scrollFrame:GetVerticalScroll()
+    local maxScroll = gui.scrollContent:GetHeight() - gui.scrollFrame:GetHeight()
+    if maxScroll < 0 then maxScroll = 0 end
+    
+    local delta = arg1 or 0
+    local newScroll = scroll - (delta * 25) -- 25px per scroll step (one row)
+    
+    if newScroll < 0 then newScroll = 0 end
+    if newScroll > maxScroll then newScroll = maxScroll end
+    
+    gui.scrollFrame:SetVerticalScroll(newScroll)
+  end)
+
   gui:Hide()
   table.insert(UISpecialFrames, "sAGUI")
 end
@@ -189,12 +216,18 @@ function sA:RefreshAuraList()
 
   if not simpleAuras or not simpleAuras.auras then return end
 
+  local totalAuras = table.getn(simpleAuras.auras)
+  
+  -- Update scroll content height based on number of auras
+  local contentHeight = totalAuras * 25 + 5
+  gui.scrollContent:SetHeight(contentHeight)
+
   for i, aura in ipairs(simpleAuras.auras) do
     local id = i
-    local row = CreateFrame("Button", nil, gui)
+    local row = CreateFrame("Button", nil, gui.scrollContent)
     row:SetWidth(260)
     row:SetHeight(20)
-    row:SetPoint("TOPLEFT", 20, -30 - (id - 1) * 25)
+    row:SetPoint("TOPLEFT", 0, -(id - 1) * 25)
     row:SetFrameStrata("HIGH")
     sA:SkinFrame(row, {0.2, 0.2, 0.2, 1})
 
@@ -212,7 +245,7 @@ function sA:RefreshAuraList()
       row:SetClampedToScreen(true)
     end)
 
-    -- drag stop: compute drop index using cursor Y and gui top, then reorder table
+    -- drag stop: compute drop index using cursor Y and scroll content, then reorder table
     row:SetScript("OnDragStop", function()
       row:StopMovingOrSizing()
       row:SetFrameStrata("HIGH")
@@ -222,17 +255,20 @@ function sA:RefreshAuraList()
       local scale = row:GetEffectiveScale() or gui:GetEffectiveScale() or 1
       cursorY = cursorY / scale
 
-      local guiTop = gui:GetTop()
-      if not guiTop then
+      local contentTop = gui.scrollContent:GetTop()
+      if not contentTop then
         sA:RefreshAuraList()
         return
       end
 
-      -- relative offset from gui top to cursor
-      local offsetFromTop = guiTop - cursorY
+      -- Get current scroll position
+      local scrollOffset = gui.scrollFrame:GetVerticalScroll()
+      
+      -- relative offset from content top to cursor (including scroll)
+      local offsetFromTop = (contentTop - cursorY) + scrollOffset
 
-      -- rows start 30 px below gui top, spacing 25 px per row; compute target index
-      local targetIndex = math.floor((offsetFromTop - 30) / 25) + 1
+      -- rows have spacing 25 px per row; compute target index
+      local targetIndex = math.floor(offsetFromTop / 25) + 1
 
       -- clamp
       local total = table.getn(simpleAuras.auras)
@@ -365,6 +401,7 @@ function sA:SaveAura(id)
   local data = simpleAuras.auras[id]
   data.name            = ed.name:GetText()
   data.enabled         = ed.enabled.value
+  data.layer           = tonumber(ed.layer:GetText()) or 0
   if sA.SuperWoW then
 	data.myCast          = ed.myCast.value
   end
@@ -391,6 +428,7 @@ function sA:SaveAura(id)
   data.dual            = ed.dual.value
 
   ed.name:ClearFocus()
+  ed.layer:ClearFocus()
   ed.texturePath:ClearFocus()
   ed.scale:ClearFocus()
   ed.x:ClearFocus()
@@ -413,7 +451,7 @@ function sA:AddAura(copyId)
   if copyId and simpleAuras.auras[copyId] then
     simpleAuras.auras[newId] = deepCopy(simpleAuras.auras[copyId])
   else
-    simpleAuras.auras[newId] = {["enabled"]=1,["myCast"]=1,["name"]="",["auracolor"]={[1]=1,[2]=1,[3]=1,[4]=1},["autodetect"]=0,["texture"]="Interface\\Icons\\INV_Misc_QuestionMark",["scale"]=1,["xpos"]=0,["ypos"]=0,["duration"]=0,["stacks"]=0,["type"]="Buff",["unit"]="Player",["showCD"]="Always",["equipped"]=0,["lowduration"]=0,["lowdurationcolor"]={[1]=1,[2]=0,[3]=0,[4]=1},["lowdurationvalue"]=5,["inCombat"]=1,["outCombat"]=1,["inParty"]=0,["inRaid"]=0,["invert"]=0,["dual"]=0}
+    simpleAuras.auras[newId] = {["enabled"]=1,["layer"]=0,["myCast"]=1,["name"]="",["auracolor"]={[1]=1,[2]=1,[3]=1,[4]=1},["autodetect"]=0,["texture"]="Interface\\Icons\\INV_Misc_QuestionMark",["scale"]=1,["xpos"]=0,["ypos"]=0,["duration"]=0,["stacks"]=0,["type"]="Buff",["unit"]="Player",["showCD"]="Always",["equipped"]=0,["lowduration"]=0,["lowdurationcolor"]={[1]=1,[2]=0,[3]=0,[4]=1},["lowdurationvalue"]=5,["inCombat"]=1,["outCombat"]=1,["inParty"]=0,["inRaid"]=0,["invert"]=0,["dual"]=0}
   end
   if gui.editor and gui.editor:IsShown() then
     gui.editor:Hide()
@@ -473,12 +511,31 @@ function sA:EditAura(id)
     ed.enabledLabel:SetPoint("LEFT", ed.enabled, "RIGHT", 5, 0)
     ed.enabledLabel:SetText("Enabled")
 
+    -- Layer input (frame stacking order)
+    ed.layerLabel = ed:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ed.layerLabel:SetPoint("LEFT", ed.enabledLabel, "RIGHT", 15, 0)
+    ed.layerLabel:SetText("Layer:")
+    
+    ed.layer = CreateFrame("EditBox", nil, ed)
+    ed.layer:SetPoint("LEFT", ed.layerLabel, "RIGHT", 5, 0)
+    ed.layer:SetWidth(30)
+    ed.layer:SetHeight(20)
+    ed.layer:SetJustifyH("CENTER")
+    ed.layer:SetMultiLine(false)
+    ed.layer:SetAutoFocus(false)
+    ed.layer:SetFontObject(GameFontHighlightSmall)
+    ed.layer:SetTextColor(1,1,1)
+    ed.layer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    ed.layer:SetBackdropColor(0.1,0.1,0.1,1)
+    ed.layer:SetBackdropBorderColor(0,0,0,1)
+    ed.layer:SetScript("OnEnterPressed", function() sA:SaveAura(id) end)
+
 	if sA.SuperWoW then
 		-- MyCast Checkbox
 		ed.myCast = CreateFrame("Button", nil, ed)
 		ed.myCast:SetWidth(16)
 		ed.myCast:SetHeight(16)
-		ed.myCast:SetPoint("LEFT", ed.enabledLabel, "RIGHT", 95, 0)
+		ed.myCast:SetPoint("LEFT", ed.layer, "RIGHT", 10, 0)
 		sA:SkinFrame(ed.myCast, {0.15,0.15,0.15,1})
 		ed.myCast:SetScript("OnEnter", function() ed.myCast:SetBackdropColor(0.5,0.5,0.5,1) end)
 		ed.myCast:SetScript("OnLeave", function() ed.myCast:SetBackdropColor(0.15,0.15,0.15,1) end)
@@ -1082,24 +1139,8 @@ function sA:EditAura(id)
 		ed.dual:Hide()
 		ed.dualLabel:Hide()
 		ed.showCD:Show()
-<<<<<<< Updated upstream
-=======
 		ed.equipped:Show()
 		ed.equippedLabel:Show()
-		if ed.nameHint then ed.nameHint:SetText("") end
-	elseif aura.type == "Reactive" then
-		ed.unitLabel:Hide()
-		ed.unitButton:Hide()
-		ed.invert:Hide()
-		ed.invertLabel:Hide()
-		ed.dual:Hide()
-		ed.dualLabel:Hide()
-		ed.showCD:Hide()
-		ed.equipped:Hide()
-		ed.equippedLabel:Hide()
-		if ed.nameHint then 
-			ed.nameHint:SetText("Proc-based spells (Riposte, Overpower, etc)")
-		end
 	else
 		-- Buff/Debuff: show all options
 		if ed.unitLabel then ed.unitLabel:Show() end
@@ -1111,8 +1152,6 @@ function sA:EditAura(id)
 		ed.showCD:Hide()
 		ed.equipped:Hide()
 		ed.equippedLabel:Hide()
-		if ed.nameHint then ed.nameHint:SetText("") end
->>>>>>> Stashed changes
 	end
 
     -- Delete / Close / Copy buttons
@@ -1168,6 +1207,7 @@ function sA:EditAura(id)
   ed.title:SetText("[" .. tostring(id) .. "] " .. (aura.name ~= "" and aura.name or "<unnamed>"))
   ed.enabled.value = aura.enabled or 1
   if ed.enabled.value == 1 then ed.enabled.checked:Show() else ed.enabled.checked:Hide() end
+  ed.layer:SetText(aura.layer or 0)
   if ed.myCast then
 	  ed.myCast.value = aura.myCast or 0
 	  if ed.myCast.value == 1 then ed.myCast.checked:Show() else ed.myCast.checked:Hide() end

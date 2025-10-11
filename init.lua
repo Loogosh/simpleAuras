@@ -2,34 +2,20 @@ local f = CreateFrame("Frame")
 f:RegisterEvent("VARIABLES_LOADED")
 f:SetScript("OnEvent", function()
 	
-		---------------------------------------------------
-		-- SavedVariables Initialization
-		---------------------------------------------------
+	---------------------------------------------------
+	-- SavedVariables Initialization
+	---------------------------------------------------
 
-<<<<<<< Updated upstream
-		-- Ensure tables exist
-		simpleAuras = simpleAuras or {}
-		simpleAuras.auras   = simpleAuras.auras   or {}
-		simpleAuras.refresh = simpleAuras.refresh or 5
-		if sA.SuperWoW then
-		  simpleAuras.auradurations = simpleAuras.auradurations or {}
-		  simpleAuras.updating      = simpleAuras.updating or 0
-		  simpleAuras.showlearning  = simpleAuras.showlearning or 0
-		  simpleAuras.learnall      = simpleAuras.learnall or 0
-		end
-=======
 	-- Ensure tables exist
 	simpleAuras = simpleAuras or {}
 	simpleAuras.auras   = simpleAuras.auras   or {}
 	simpleAuras.refresh = simpleAuras.refresh or 5
-	simpleAuras.reactiveDurations = simpleAuras.reactiveDurations or {}  -- Reactive spell durations
 	if sA.SuperWoW then
 	  simpleAuras.auradurations = simpleAuras.auradurations or {}
 	  simpleAuras.updating      = simpleAuras.updating or 0
 	  simpleAuras.showlearning  = simpleAuras.showlearning or 0
 	  simpleAuras.learnall      = simpleAuras.learnall or 0
 	end
->>>>>>> Stashed changes
 		
 		sA.SettingsLoaded = 1
 		
@@ -41,9 +27,6 @@ f:SetScript("OnEvent", function()
 end)
 
 -- runtime only
-<<<<<<< Updated upstream
-sA = sA or { auraTimers = {}, learnCastTimers = {}, learnNew = {}, frames = {}, dualframes = {}, draggers = {} }
-=======
 sA = sA or { 
   auraTimers = {}, 
   learnCastTimers = {}, 
@@ -52,14 +35,9 @@ sA = sA or {
   dualframes = {}, 
   draggers = {}, 
   activeAuras = {},
-  reactiveTimers = {},      -- [spellName] = {expiry, warnedOnce}
   itemIDCache = {}          -- [itemName] = itemID (for cooldown tracking)
 }
 
--- Get version from .toc file using WoW API
-sA.VERSION = GetAddOnMetadata("simpleAuras", "Version") or "1.0"
-
->>>>>>> Stashed changes
 sA.SuperWoW = SetAutoloot and true or false
 local _, playerGUID = UnitExists("player")
 sA.playerGUID = playerGUID
@@ -320,16 +298,12 @@ sACombat:SetScript("OnEvent", function()
   end
 end)
 
-<<<<<<< Updated upstream
-=======
 -- Aura tracking events (event-driven updates)
 local sAAuraTracker = CreateFrame("Frame")
 sAAuraTracker:RegisterEvent("UNIT_AURA")
 sAAuraTracker:RegisterEvent("PLAYER_AURAS_CHANGED")
 sAAuraTracker:RegisterEvent("PLAYER_TARGET_CHANGED")
 sAAuraTracker:RegisterEvent("SPELL_UPDATE_COOLDOWN")
-sAAuraTracker:RegisterEvent("SPELL_UPDATE_USABLE")
-sAAuraTracker:RegisterEvent("COMBAT_TEXT_UPDATE")
 sAAuraTracker:RegisterEvent("BAG_UPDATE")
 sAAuraTracker:RegisterEvent("BAG_UPDATE_COOLDOWN")
 sAAuraTracker:RegisterEvent("UNIT_INVENTORY_CHANGED")
@@ -371,32 +345,9 @@ sAAuraTracker:SetScript("OnEvent", function()
     if arg1 == "player" then
       sA:UpdateCooldownData()
     end
-    
-  elseif event == "SPELL_UPDATE_USABLE" then
-    -- Update reactive spell states (proc-based abilities)
-    sA:UpdateReactiveData()
-    
-  elseif event == "COMBAT_TEXT_UPDATE" then
-    -- Floating Combat Text event - fires for reactive ability activation
-    -- NOTE: COMBAT_TEXT_UPDATE SPELL_ACTIVE only fires when ability BECOMES available,
-    --       not on subsequent procs while already active. For 100% proc tracking,
-    --       consider using CHAT_MSG_COMBAT_SELF_MISSES to detect dodge/parry/block
-    --       and manually refresh reactive timers.
-    local updateType = arg1
-    local spellName = arg2
-    
-    if updateType == "SPELL_ACTIVE" and spellName then
-      -- Trim whitespace from spell name
-      spellName = gsub(spellName, "^%s+", "")
-      spellName = gsub(spellName, "%s+$", "")
-      
-      -- Reactive ability became active
-      sA:HandleReactiveActivation(spellName)
-    end
   end
 end)
 
->>>>>>> Stashed changes
 ---------------------------------------------------
 -- Slash Commands
 ---------------------------------------------------
@@ -495,68 +446,15 @@ SlashCmdList["sA"] = function(msg)
 	
 	-- track others
 	if cmd == "showlearning" then
-<<<<<<< Updated upstream
 		if sA.SuperWoW then
 			local num = tonumber(val)
 			if num and (num == 0 or num == 1) then
 				simpleAuras.showlearning = num
 				sA:Msg("ShowLearning status set to " .. num)
-=======
-		local num = tonumber(val)
-		if num and (num == 0 or num == 1) then
-			simpleAuras.showlearning = num
-			sA:Msg("ShowLearning status set to " .. num)
-		else
-			sA:Msg("Usage: /sa showlearning X - shows learning messages in chat (1 = show. Default: 0).")
-			sA:Msg("Works for both auras (SuperWoW) and reactive spells.")
-			sA:Msg("Current ShowLearning status = " .. simpleAuras.showlearning)
-		end
-		return
-	end
-	
-	-- reactduration command (special parsing for spell names with spaces)
-	if cmd == "reactduration" then
-		-- Extract everything after "reactduration" and parse manually
-		local fullArgs = string.match(msg, "^reactduration%s+(.+)$")
-		
-		if fullArgs then
-			-- Find last number (duration)
-			local duration = tonumber(string.match(fullArgs, "(%d+)%s*$"))
-			if duration and duration > 0 then
-				-- Extract spell name/ID (everything before last number)
-				local spellIdentifier = string.match(fullArgs, "^(.-)%s*%d+%s*$")
-				-- Remove quotes if present
-				spellIdentifier = string.gsub(spellIdentifier or "", "^[\"']+", "")
-				spellIdentifier = string.gsub(spellIdentifier, "[\"']+$", "")
-				spellIdentifier = string.gsub(spellIdentifier, "^%s+", "")
-				spellIdentifier = string.gsub(spellIdentifier, "%s+$", "")
-				
-				if spellIdentifier and spellIdentifier ~= "" then
-					-- Support both spell name and spellID
-					local spellID = tonumber(spellIdentifier)
-					if spellID then
-						-- It's a spellID
-						local spellName = SpellInfo(spellID)
-						if spellName then
-							simpleAuras.reactiveDurations[spellName] = duration
-							sA:Msg("Set reactive duration of '" .. spellName .. "' (ID:" .. spellID .. ") to " .. duration .. " seconds.")
-						else
-							sA:Msg("SpellID " .. spellID .. " not found!")
-						end
-					else
-						-- It's a spell name
-						simpleAuras.reactiveDurations[spellIdentifier] = duration
-						sA:Msg("Set reactive duration of '" .. spellIdentifier .. "' to " .. duration .. " seconds.")
-					end
-				else
-					sA:Msg("Invalid spell name/ID!")
-				end
->>>>>>> Stashed changes
 			else
 				sA:Msg("Usage: /sa showlearning X - shows learning of new AuraDurations in chat (1 = show. Default: 0).")
 				sA:Msg("Current ShowLearning status = " .. simpleAuras.showlearning)
 			end
-			return
 		else
 			sA:Msg("/sa showlearning needs SuperWoW to be installed!")
 		end

@@ -398,9 +398,6 @@ local function CreateDualFrame(id)
 end
 
 -------------------------------------------------
-<<<<<<< Updated upstream
--- Update aura display
-=======
 -- Initialize aura cache on addon load
 -------------------------------------------------
 function sA:InitializeAuraCache()
@@ -579,7 +576,6 @@ end
 -- Called by: OnUpdate at FIXED 20 FPS (0.05 sec intervals)
 -- Data source: sA.activeAuras cache (populated by UpdateAuraDataForUnit/UpdateCooldownData)
 -- Only calculates: remaining = expiry - GetTime() (simple math!)
->>>>>>> Stashed changes
 -------------------------------------------------
 function sA:UpdateAuras()
 
@@ -709,7 +705,7 @@ function sA:UpdateAuras()
 			textscale = scale
 		end
         frame:SetPoint("CENTER", UIParent, "CENTER", aura.xpos or 0, aura.ypos or 0)
-        frame:SetFrameLevel(128 - id)
+        frame:SetFrameLevel(aura.layer or 0)
         frame:SetWidth(48 * scale)
   	    frame:SetHeight(48 * scale)
         frame.texture:SetTexture(aura.texture)
@@ -753,7 +749,7 @@ function sA:UpdateAuras()
         -------------------------------------------------
         if aura.dual == 1 and aura.type ~= "Cooldown" and dualframe then
           dualframe:SetPoint("CENTER", UIParent, "CENTER", -(aura.xpos or 0), aura.ypos or 0)
-          dualframe:SetFrameLevel(128 - id)
+          dualframe:SetFrameLevel(aura.layer or 0)
           dualframe:SetWidth(48 * scale)
   		    dualframe:SetHeight(48 * scale)
           dualframe.texture:SetTexture(aura.texture)

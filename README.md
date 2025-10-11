@@ -13,9 +13,8 @@
 ## Known Issues
 - Learning new AuraDuration gets prematurely completed if another player's aura with the same name runs out on the same target before yours - no way to get casterID when an aura fades.
 - Skills that apply Auras with the same name may show "learning" all the time (maybe this one is fixed now - wasn't able to test yet).
-- Having more than 16 auras shows auras outside the GUI frame (scrollframe possible, but then has more/other issues)
 - AddOn is kinda heavy on ressources (compared to other addons), will optimize in a future update.
-- /sa learnall 1 tries to learn spells without aura (i.e. smite, shadowbolt, etc.)
+- /sa learnall 1 tries to learn spells without aura (i.e. smite, shadowbolt, etc.).
 
 
 ## Console Commands:
@@ -45,10 +44,12 @@ Shows all existing auras.
 - [+] / Add Aura: Creates a new, blank aura.
 - [i] / Import: Opens a window to import one or multiple auras from a text string.
 - [e] / Export: Exports all your auras into a single text string.
-- v / ^: Sort aura priority (higher in the list = will be shown over other auras below)
+- v / ^: Sort aura priority (for organizational purposes)
+- Scroll: Mouse wheel to scroll through aura list (unlimited auras supported)
 
   *(you can also sort auras via drag & drop)*
 - Movable Auras: While in settings, you can move any visible aura by holding down `Ctrl`+`Alt`+`Shift` keys and dragging it.
+- Layer Control: Use Layer field to control which auras display on top (higher number = on top)
 
 
 ### Aura-Editor
@@ -56,6 +57,9 @@ Shows the currently edited aura only.
 
 Enabled/Disabled:
 - A master toggle at the top of the editor to quickly turn an aura on or off. Disabled auras are highlighted in red in the main list.
+
+Layer:
+- Frame stacking order (0-999). Higher layer number = displayed on top of lower layers. Default: 0.
 
 My Casts only*:
 - Only tracks your own casts of edited aura.
@@ -99,47 +103,6 @@ Other:
 
 \* = For these functions to work on targets SuperWoW is REQUIRED! Also only shows your own AuraDurations.
 
-
-<<<<<<< Updated upstream
-=======
-## Reactive Spells Setup (Riposte, Overpower, etc)
-
-Reactive spells are proc-based abilities that become available after specific events (dodge, parry, block). Unlike buffs and cooldowns, they require **manual duration setup**.
-
-### How to set up:
-
-1. **Create the aura:**
-   - Type: `Reactive`
-   - Aura Name: Exact spell name (e.g., `Riposte`, `Surprise Attack`)
-   - Enable: `Show Duration`
-   - Conditions: Set as needed (In Combat, etc)
-
-2. **Set duration manually (REQUIRED):**
-   ```
-   /sa reactduration Riposte 5
-   /sa reactduration Surprise Attack 4
-   ```
-   Or use spell ID:
-   ```
-   /sa reactduration 14251 5
-   ```
-
-3. **Manage saved durations:**
-   ```
-   /sa forget react Riposte          -- Remove specific spell
-   /sa forget react all               -- Remove all reactive durations
-   ```
-
-4. **Test it:**
-   - Wait for proc to trigger (dodge/parry/block)
-   - Icon will appear with timer countdown
-   - Timer refreshes on repeated procs (when detected)
-   - Icon disappears when you use the ability or timer expires
-
-### Known Limitations:
-- **Manual duration required:** Vanilla API doesn't provide proc expiration events.
-- **Refresh detection:** `COMBAT_TEXT_UPDATE` only fires when ability *becomes* available, not on subsequent procs while already active. This means not all repeated procs within the duration window will be detected for refresh.
-- **Workaround:** For 100% proc tracking, you could extend the code to parse `CHAT_MSG_COMBAT_SELF_MISSES` for dodge/parry/block events and manually refresh timers.
 
 ## Cooldown Tracking
 

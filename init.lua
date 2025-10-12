@@ -10,6 +10,7 @@ f:SetScript("OnEvent", function()
 	simpleAuras = simpleAuras or {}
 	simpleAuras.auras   = simpleAuras.auras   or {}
 	simpleAuras.refresh = simpleAuras.refresh or 5
+	simpleAuras.reactiveDurations = simpleAuras.reactiveDurations or {}  -- Reactive spell durations
 	if sA.SuperWoW then
 	  simpleAuras.auradurations = simpleAuras.auradurations or {}
 	  simpleAuras.updating      = simpleAuras.updating or 0
@@ -35,6 +36,7 @@ sA = sA or {
   dualframes = {}, 
   draggers = {}, 
   activeAuras = {},
+  reactiveTimers = {},      -- [spellName] = {expiry, warnedOnce}
   itemIDCache = {}          -- [itemName] = itemID (for cooldown tracking)
 }
 
@@ -143,14 +145,26 @@ if sA.SuperWoW then
         end
       end
 
-    elseif event == "UNIT_CASTEVENT" and simpleAuras.auradurations then
+    elseif event == "UNIT_CASTEVENT" then
       local casterGUID, targetGUID, evType, spellID = arg1, arg2, arg3, arg4
       if evType ~= "CAST" or not spellID then return end
 	  
       local spellName = SpellInfo(spellID)
+      
+      -- Check if player used a reactive spell (deactivate it)
+      if casterGUID then
+        local _, playerGUID = UnitExists("player")
+        if playerGUID then playerGUID = gsub(playerGUID, "^0x", "") end
+        casterGUID = gsub(casterGUID or "", "^0x", "")
+        
+        if casterGUID == playerGUID and spellName then
+          sA:HandleReactiveSpellUsed(spellName)
+        end
+      end
+      
 	  local auraIDs = getAuraID(spellName)
 
-	  if ((auraIDs and getn(auraIDs) > 0) or simpleAuras.learnall == 1) and spellID then
+	  if ((auraIDs and getn(auraIDs) > 0) or simpleAuras.learnall == 1) and spellID and simpleAuras.auradurations then
 
 		  if sA.playerGUID then
 			sA.playerGUID = gsub(sA.playerGUID, "^0x", "")
@@ -189,7 +203,7 @@ if sA.SuperWoW then
 			sA.auraTimers[targetGUID][spellID].castby = casterGUID
 									
 			for _, auraID in ipairs(auraIDs) do
-				if simpleAuras.auras[auraID].unit ~= "Player" and simpleAuras.auras[auraID].type ~= "Cooldown" then
+				if simpleAuras.auras[auraID].unit ~= "Player" and simpleAuras.auras[auraID].type ~= "Cooldown" and simpleAuras.auras[auraID].type ~= "Reactive" then
 					showLearn = true
 					break
 				end
@@ -213,13 +227,14 @@ if sA.SuperWoW then
   end)
 end
 
--- Timed updates
+-- Timed updates (RENDERING ONLY - fixed 20 FPS)
 local sAEvent = CreateFrame("Frame", "sAEvent", UIParent)
 sAEvent:SetScript("OnUpdate", function()
+  if not sA.SettingsLoaded then return end
 
 	local time = GetTime()
-	local refreshRate = 1 / (simpleAuras.refresh or 5)
-	if (time - (sAEvent.lastUpdate or 0)) < refreshRate then return end
+	local renderRate = 0.05  -- Fixed 20 FPS for rendering
+	if (time - (sAEvent.lastUpdate or 0)) < renderRate then return end
 		
   -- Cache the UI scale in a safe context
   sA.uiScale = UIParent:GetEffectiveScale()
@@ -289,6 +304,38 @@ sAEvent:SetScript("OnUpdate", function()
 		
 end)
 
+-- Periodic data updates (controlled by /sa refresh setting)
+-- This is the HEAVY operation: scans UnitBuff, UnitDebuff, GetSpellCooldown
+local sADataUpdate = CreateFrame("Frame", "sADataUpdate", UIParent)
+sADataUpdate:SetScript("OnUpdate", function()
+  if not sA.SettingsLoaded then return end
+  
+  local time = GetTime()
+  -- Frequency controlled by simpleAuras.refresh (1-10 per second)
+  local dataRefreshRate = 1 / (simpleAuras.refresh or 5)
+  if (time - (sADataUpdate.lastUpdate or 0)) < dataRefreshRate then return end
+  
+  sADataUpdate.lastUpdate = time
+  
+  -- Rescan auras (catches missed events + provides periodic fallback)
+  sA:UpdateAuraDataForUnit("Player")
+  if UnitExists("target") then
+    sA:UpdateAuraDataForUnit("Target")
+  else
+    -- Clear target auras if no target exists
+    for id, aura in ipairs(simpleAuras.auras or {}) do
+      if aura and aura.unit == "Target" and sA.activeAuras[id] then
+        sA.activeAuras[id].active = false
+        sA.activeAuras[id].expiry = nil
+      end
+    end
+  end
+  
+  -- Update cooldown and reactive states
+  sA:UpdateCooldownData()
+  sA:UpdateReactiveData()
+end)
+
 -- Combat state
 local sACombat = CreateFrame("Frame")
 sACombat:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -307,6 +354,8 @@ sAAuraTracker:RegisterEvent("UNIT_AURA")
 sAAuraTracker:RegisterEvent("PLAYER_AURAS_CHANGED")
 sAAuraTracker:RegisterEvent("PLAYER_TARGET_CHANGED")
 sAAuraTracker:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+sAAuraTracker:RegisterEvent("SPELL_UPDATE_USABLE")
+sAAuraTracker:RegisterEvent("COMBAT_TEXT_UPDATE")
 sAAuraTracker:RegisterEvent("BAG_UPDATE")
 sAAuraTracker:RegisterEvent("BAG_UPDATE_COOLDOWN")
 sAAuraTracker:RegisterEvent("UNIT_INVENTORY_CHANGED")
@@ -347,6 +396,24 @@ sAAuraTracker:SetScript("OnEvent", function()
     -- Equipped items changed (trinkets, etc)
     if arg1 == "player" then
       sA:UpdateCooldownData()
+    end
+    
+  elseif event == "SPELL_UPDATE_USABLE" then
+    -- Update reactive spell states (proc-based abilities)
+    sA:UpdateReactiveData()
+    
+  elseif event == "COMBAT_TEXT_UPDATE" then
+    -- Floating Combat Text event - fires for reactive ability activation
+    local updateType = arg1
+    local spellName = arg2
+    
+    if updateType == "SPELL_ACTIVE" and spellName then
+      -- Trim whitespace from spell name
+      spellName = gsub(spellName, "^%s+", "")
+      spellName = gsub(spellName, "%s+$", "")
+      
+      -- Reactive ability became active
+      sA:HandleReactiveActivation(spellName)
     end
   end
 end)
@@ -449,17 +516,47 @@ SlashCmdList["sA"] = function(msg)
 	
 	-- track others
 	if cmd == "showlearning" then
-		if sA.SuperWoW then
-			local num = tonumber(val)
-			if num and (num == 0 or num == 1) then
-				simpleAuras.showlearning = num
-				sA:Msg("ShowLearning status set to " .. num)
+		local num = tonumber(val)
+		if num and (num == 0 or num == 1) then
+			simpleAuras.showlearning = num
+			sA:Msg("ShowLearning status set to " .. num)
+		else
+			sA:Msg("Usage: /sa showlearning X - shows learning messages in chat (1 = show. Default: 0).")
+			sA:Msg("Works for both auras (SuperWoW) and reactive spells.")
+			sA:Msg("Current ShowLearning status = " .. simpleAuras.showlearning)
+		end
+		return
+	end
+	
+	-- reactduration command (special parsing for spell names with spaces)
+	if cmd == "reactduration" then
+		-- Extract everything after "reactduration" and parse manually
+		local fullArgs = string.match(msg, "^reactduration%s+(.+)$")
+		
+		if fullArgs then
+			-- Find last number (duration)
+			local duration = tonumber(string.match(fullArgs, "(%d+)%s*$"))
+			if duration and duration > 0 then
+				-- Extract spell name/ID (everything before last number)
+				local spellIdentifier = string.match(fullArgs, "^(.-)%s*%d+%s*$")
+				-- Remove quotes if present
+				spellIdentifier = string.gsub(spellIdentifier or "", "^[\"']+", "")
+				spellIdentifier = string.gsub(spellIdentifier, "[\"']+$", "")
+				spellIdentifier = string.gsub(spellIdentifier, "^%s+", "")
+				spellIdentifier = string.gsub(spellIdentifier, "%s+$", "")
+				
+				if spellIdentifier and spellIdentifier ~= "" then
+					simpleAuras.reactiveDurations[spellIdentifier] = duration
+					sA:Msg("Set reactive duration of '" .. spellIdentifier .. "' to " .. duration .. " seconds.")
+				else
+					sA:Msg("Invalid spell name!")
+				end
 			else
-				sA:Msg("Usage: /sa showlearning X - shows learning of new AuraDurations in chat (1 = show. Default: 0).")
-				sA:Msg("Current ShowLearning status = " .. simpleAuras.showlearning)
+				sA:Msg("Invalid duration!")
 			end
 		else
-			sA:Msg("/sa showlearning needs SuperWoW to be installed!")
+			sA:Msg("Usage: /sa reactduration \"Spell Name\" X - set duration X for reactive spell.")
+			sA:Msg("Example: /sa reactduration Riposte 5")
 		end
 		return
 	end

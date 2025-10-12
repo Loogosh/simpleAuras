@@ -780,7 +780,7 @@ function sA:EditAura(id)
         menu:SetFrameStrata("DIALOG")
         menu:SetFrameLevel(10)
         menu:SetWidth(80)
-        menu:SetHeight(40)
+        menu:SetHeight(80)
         sA:SkinFrame(menu, {0.15,0.15,0.15,1})
         menu:Hide()
         ed.typeButton.menu = menu
@@ -805,6 +805,7 @@ function sA:EditAura(id)
         makeChoice("Buff", 1)
         makeChoice("Debuff", 2)
         makeChoice("Cooldown", 3)
+        makeChoice("Reactive", 4)
       end
       local menu = ed.typeButton.menu
       if menu:IsVisible() then menu:Hide() else menu:Show() end
@@ -1141,6 +1142,16 @@ function sA:EditAura(id)
 		ed.showCD:Show()
 		ed.equipped:Show()
 		ed.equippedLabel:Show()
+	elseif aura.type == "Reactive" then
+		ed.unitLabel:Hide()
+		ed.unitButton:Hide()
+		ed.invert:Hide()
+		ed.invertLabel:Hide()
+		ed.dual:Hide()
+		ed.dualLabel:Hide()
+		ed.showCD:Hide()
+		ed.equipped:Hide()
+		ed.equippedLabel:Hide()
 	else
 		-- Buff/Debuff: show all options
 		if ed.unitLabel then ed.unitLabel:Show() end

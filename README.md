@@ -104,6 +104,35 @@ Other:
 \* = For these functions to work on targets SuperWoW is REQUIRED! Also only shows your own AuraDurations.
 
 
+## Reactive Spells Setup (Riposte, Overpower, etc)
+
+Reactive spells are proc-based abilities that become available after specific events (dodge, parry, block). Unlike buffs and cooldowns, they require **manual duration setup**.
+
+### How to set up:
+
+1. **Create the aura:**
+   - Type: `Reactive`
+   - Aura Name: Exact spell name (e.g., `Riposte`, `Surprise Attack`)
+   - Enable: `Show Duration`
+   - Conditions: Set as needed (In Combat, etc)
+
+2. **Set duration manually (REQUIRED):**
+   ```
+   /sa reactduration Riposte 5
+   /sa reactduration "Surprise Attack" 6
+   /sa reactduration Overpower 5
+   ```
+
+3. **Test it:**
+   - Wait for proc to trigger (dodge/parry/block)
+   - Icon will appear with timer countdown
+   - Timer refreshes on repeated procs (when detected)
+   - Icon disappears when you use the ability or timer expires
+
+### Known Limitations:
+- **Manual duration required:** Vanilla API doesn't provide proc expiration events.
+- **Refresh detection:** `COMBAT_TEXT_UPDATE` only fires when ability *becomes* available, not on subsequent procs while already active.
+
 ## Cooldown Tracking
 
 simpleAuras tracks cooldowns for:

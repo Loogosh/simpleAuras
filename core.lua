@@ -162,24 +162,10 @@ function sA:GetCooldownInfo(spellName)
     end
   end
   
-  -- Fallback: use cached itemID to get cooldown
+  -- Fallback: item was consumed or moved, keep showing aura without cooldown
   -- Texture will be taken from aura.texture (user-configured or autodetected earlier)
-  if sA.itemIDCache[spellName] then
-    local itemID = sA.itemIDCache[spellName]
-    
-    -- Check global item cooldown by itemID
-    local start, duration, enabled = GetItemCooldown(itemID)
-    
-    local remaining
-    if enabled == 1 and duration and duration > 1.5 then
-      remaining = (start + duration) - GetTime()
-      if remaining <= 0 then remaining = nil end
-    end
-    
-    -- Return nil texture (will use aura.texture from config), but with valid cooldown
-    -- isInBag = 0 for fallback (unknown location)
-    return nil, remaining, 0
-  end
+  -- Note: GetItemCooldown(itemID) doesn't exist in Vanilla 1.12
+  -- We can't track cooldown without item location (bag/slot or inventory slot)
   
   return nil, nil, 0
 end
